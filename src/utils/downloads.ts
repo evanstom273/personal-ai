@@ -1,4 +1,5 @@
 import type { DocumentRecord } from '@/storage/types'
+import { isCapacitorNativePlatform } from '@/utils/capacitor'
 import { formatChangelogMarkdown } from '@/data/changelog'
 import { getAppReferenceMarkdown } from '@/services/claude/appReferenceContext'
 import {
@@ -6,7 +7,44 @@ import {
 	htmlToPlainTextMultiline,
 } from '@/utils/documentContent'
 
+const NATIVE_DOWNLOAD_FOLDER = 'JARVIS'
+
+/**
+ * The Android WebView ignores <a download>, so in the app files are written
+ * to Documents/JARVIS with the Filesystem plugin instead.
+ */
+async function saveToDeviceDocuments(base64Data: string, filename: string): Promise<void> {
+	const path = `${NATIVE_DOWNLOAD_FOLDER}/${filename}`
+	try {
+		const { Directory, Filesystem } = await import('@capacitor/filesystem')
+		await Filesystem.writeFile({
+			path,
+			data: base64Data,
+			directory: Directory.Documents,
+			recursive: true,
+		})
+		window.alert(`Saved to Documents/${path}`)
+	} catch (error) {
+		window.alert(
+			`Couldn't save ${filename}: ${error instanceof Error ? error.message : 'unknown error'}`,
+		)
+	}
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader()
+		reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''))
+		reader.onerror = () => reject(reader.error)
+		reader.readAsDataURL(blob)
+	})
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
+	if (isCapacitorNativePlatform()) {
+		void blobToBase64(blob).then((data) => saveToDeviceDocuments(data, filename))
+		return
+	}
 	const url = URL.createObjectURL(blob)
 	const anchor = document.createElement('a')
 	anchor.href = url
@@ -16,6 +54,17 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export function downloadDataUrl(dataUrl: string, filename: string): void {
+	if (isCapacitorNativePlatform()) {
+		const data = dataUrl.startsWith('data:') ? dataUrl.replace(/^data:[^,]*,/, '') : ''
+		if (data && /;base64,/.test(dataUrl.slice(0, 100))) {
+			void saveToDeviceDocuments(data, filename)
+		} else {
+			void fetch(dataUrl)
+				.then((response) => response.blob())
+				.then((blob) => downloadBlob(blob, filename))
+		}
+		return
+	}
 	const anchor = document.createElement('a')
 	anchor.href = dataUrl
 	anchor.download = filename
@@ -103,7 +152,7 @@ async function downloadDocumentPdf(
 			: htmlToPlainTextMultiline(document.content)
 	const lines = pdf.splitTextToSize(text || document.title, 180)
 	pdf.text(lines, 14, 20)
-	pdf.save(filename)
+	downloadBlob(pdf.output('blob'), filename)
 }
 
 export function downloadLibraryMediaItem(

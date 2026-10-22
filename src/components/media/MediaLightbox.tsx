@@ -56,6 +56,7 @@ export function MediaLightbox({
 			<Dialog open={open} onOpenChange={setOpen}>
 				<DialogContent
 					className="fixed inset-0 top-0 left-0 flex h-full w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 bg-black/95 p-0 shadow-none"
+					closeClassName="top-[calc(var(--app-top-inset)+0.75rem)] right-3 z-10 rounded-full bg-white/10 p-2 text-white opacity-100 hover:bg-white/20 [&_svg]:h-5 [&_svg]:w-5"
 					aria-describedby={undefined}
 				>
 					<DialogTitle className="sr-only">{title ?? alt}</DialogTitle>
@@ -68,12 +69,12 @@ export function MediaLightbox({
 							const mimeType = src.match(/^data:([^;,]+)/)?.[1] ?? 'image/png'
 							downloadLibraryMediaItem(title ?? alt, mimeType, src)
 						}}
-						className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
+						className="absolute top-[calc(var(--app-top-inset)+0.75rem)] left-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
 					>
 						<Download className="h-3.5 w-3.5" />
 						Download
 					</button>
-					<div className="flex min-h-0 flex-1 items-center justify-center p-4 pt-14">
+					<div className="flex min-h-0 flex-1 items-center justify-center p-4 pt-[calc(var(--app-top-inset)+3.5rem)]">
 						<img
 							src={src}
 							alt={alt}

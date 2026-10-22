@@ -38,9 +38,10 @@ export function DialogOverlay({
 
 export function DialogContent({
 	className,
+	closeClassName,
 	children,
 	...props
-}: ComponentProps<typeof DialogPrimitive.Content>) {
+}: ComponentProps<typeof DialogPrimitive.Content> & { closeClassName?: string }) {
 	return (
 		<DialogPortal>
 			<DialogOverlay />
@@ -52,7 +53,12 @@ export function DialogContent({
 				{...props}
 			>
 				{children}
-				<DialogPrimitive.Close className="absolute top-4 right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:outline-none">
+				<DialogPrimitive.Close
+					className={cn(
+						'absolute top-4 right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:outline-none',
+						closeClassName,
+					)}
+				>
 					<X className="h-4 w-4" />
 					<span className="sr-only">Close</span>
 				</DialogPrimitive.Close>

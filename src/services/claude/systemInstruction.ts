@@ -42,14 +42,16 @@ export function buildSystemInstruction(preferences: UserPreferences): string {
 }
 
 /** App capabilities and tool etiquette for the main chat. */
-export function buildChatCapabilitiesInstruction(): string {
+export function buildChatCapabilitiesInstruction(options: { imageGeneration: boolean }): string {
 	return [
 		'How this app works:',
 		'- The user can keep several separate conversations. Long-term memory, documents, projects, reminders, and to-dos are shared across all of them.',
 		'- Each user message starts with a [Sent …] line giving its date, time, and time zone. The most recent one is the current time; use it for scheduling and temporal reasoning. Never write a [Sent …] line yourself.',
 		'- Only recent messages are replayed to you. Older messages are archived into long-term memory automatically.',
 		'- You can read images, PDFs, and text or code files the user attaches. Attachments from older messages may be dropped from context to save cost.',
-		'- You cannot generate images, music, audio, or video. If asked, say so plainly and offer a written alternative (a description, a prompt, lyrics, a script).',
+		options.imageGeneration
+			? '- You can create images with the generate_image tool (square 1024×1024 only), but only when the user explicitly asks for an image. You cannot generate music, audio, or video.'
+			: '- You cannot generate images, music, audio, or video here. If asked, say so plainly and offer a written alternative (a description, a prompt, lyrics, a script). Image generation is available in the Android app when Cloudflare is set up.',
 		'',
 		'Tools:',
 		'- Documents are shared between you and the user. A catalog of titles, ids, and short previews is provided below; call read_document for full text before editing. Write documents in Markdown. Deleting a document needs the user to confirm in the app.',

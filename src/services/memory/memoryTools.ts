@@ -4,7 +4,12 @@ import {
 	isMemoryCategory,
 	listMemoryEntries,
 } from '@/services/memory/memoryService'
-import type { MemoryEntry } from '@/storage/types'
+import {
+	filterDuplicateMemories,
+	isSemanticMemoryAvailable,
+	searchMemorySemantically,
+} from '@/services/memory/semanticMemory'
+import type { MemoryEntry, UserPreferences } from '@/storage/types'
 
 const MAX_SEARCH_RESULTS = 15
 
@@ -76,6 +81,7 @@ function scoreEntry(entry: MemoryEntry, terms: string[]): number {
 export async function executeMemoryToolCall(
 	name: string,
 	args: Record<string, unknown>,
+	preferences: UserPreferences,
 ): Promise<MemoryToolResult> {
 	switch (name) {
 		case 'search_memory': {
@@ -84,6 +90,33 @@ export async function executeMemoryToolCall(
 			const terms = query.split(/\s+/).filter((term) => term.length > 1)
 			if (terms.length === 0) {
 				return { name, response: { error: 'query is required.' } }
+			}
+
+			if (isSemanticMemoryAvailable(preferences)) {
+				try {
+					const semantic = await searchMemorySemantically(
+						preferences,
+						typeof args.query === 'string' ? args.query : query,
+						MAX_SEARCH_RESULTS,
+					)
+					return {
+						name,
+						response: {
+							query,
+							search: 'semantic',
+							matches: semantic
+								.filter(({ entry }) => !category || entry.category === category)
+								.map(({ entry, score }) => ({
+									content: entry.content,
+									category: entry.category,
+									relevance: Math.round(score * 100) / 100,
+									saved_at: new Date(entry.createdAt).toISOString(),
+								})),
+						},
+					}
+				} catch {
+					// Fall back to keyword search below.
+				}
 			}
 
 			const entries = await listMemoryEntries()
@@ -112,13 +145,24 @@ export async function executeMemoryToolCall(
 				return { name, response: { error: 'content is required.' } }
 			}
 			const categoryValue = typeof args.category === 'string' ? args.category : 'fact'
-			const [saved] = await addMemoryEntries([
+			let candidates = [
 				{
 					content,
 					category: isMemoryCategory(categoryValue) ? categoryValue : 'fact',
 					archivedFromMessageCount: 0,
 				},
-			])
+			]
+			if (isSemanticMemoryAvailable(preferences)) {
+				try {
+					candidates = await filterDuplicateMemories(preferences, candidates)
+				} catch {
+					// Save without an embedding; it is added on the next semantic search.
+				}
+				if (candidates.length === 0) {
+					return { name, response: { saved: false, reason: 'A memory with the same meaning already exists.' } }
+				}
+			}
+			const [saved] = await addMemoryEntries(candidates)
 			return {
 				name,
 				response: saved

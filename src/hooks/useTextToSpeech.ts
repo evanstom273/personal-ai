@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { getCloudflareAvailability } from '@/services/cloudflare/client'
+import { synthesizeWithCloudflare } from '@/services/cloudflare/speech'
 import type { TtsReadAloudMode, UserPreferences } from '@/storage/types'
 import { prepareTextForSpeech } from '@/utils/speechText'
 
-export type TtsPlaybackStatus = 'idle' | 'loading' | 'playing'
+export type TtsPlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused'
 
 export interface SpeakAssistantMessageOptions {
 	messageId: string
@@ -25,6 +27,8 @@ interface UseTextToSpeechOptions {
 
 /** Chrome cuts long utterances off after ~15 seconds, so speak in sentence-sized chunks. */
 const MAX_UTTERANCE_CHARS = 220
+/** Cloudflare chunks: short first chunk so audio starts quickly, then fetched one ahead. */
+const MAX_CLOUDFLARE_CHUNK_CHARS = 600
 
 export function isSpeechSynthesisSupported(): boolean {
 	return (
@@ -49,7 +53,8 @@ export function shouldAutoPlayAssistantSpeech(
 	return false
 }
 
-function splitIntoUtterances(text: string): string[] {
+function splitIntoUtterances(text: string, maxChars = MAX_UTTERANCE_CHARS): string[] {
+	const MAX_UTTERANCE_CHARS = maxChars
 	const sentences = text.match(/[^.!?\n]+[.!?]*\s*|\n+/g) ?? [text]
 	const chunks: string[] = []
 	let current = ''
@@ -120,14 +125,21 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 	const [status, setStatus] = useState<TtsPlaybackStatus>('idle')
 	const [error, setError] = useState<string | null>(null)
 	const [voices, setVoices] = useState<SpeechVoiceOption[]>([])
-	const [isSupported] = useState(isSpeechSynthesisSupported)
+	const [deviceSupported] = useState(isSpeechSynthesisSupported)
+	const useCloudflare = useMemo(
+		() => preferences.ttsEngine === 'cloudflare' && getCloudflareAvailability(preferences).ok,
+		[preferences],
+	)
+	const isSupported = deviceSupported || useCloudflare
+	const audioRef = useRef<HTMLAudioElement | null>(null)
+	const playbackDoneRef = useRef<(() => void) | null>(null)
 
 	const requestIdRef = useRef(0)
 	const onEndedRef = useRef<(() => void) | null>(null)
 	const rawVoicesRef = useRef<SpeechSynthesisVoice[]>([])
 
 	useEffect(() => {
-		if (!isSupported) {
+		if (!deviceSupported) {
 			return
 		}
 
@@ -142,7 +154,7 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 		return () => {
 			synth.removeEventListener('voiceschanged', loadVoices)
 		}
-	}, [isSupported])
+	}, [deviceSupported])
 
 	const finishPlayback = useCallback((requestId: number) => {
 		if (requestId !== requestIdRef.current) {
@@ -155,15 +167,99 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 		onEnded?.()
 	}, [])
 
+	const stopAudio = useCallback(() => {
+		const audio = audioRef.current
+		if (audio) {
+			audio.pause()
+			audio.removeAttribute('src')
+		}
+		const done = playbackDoneRef.current
+		playbackDoneRef.current = null
+		done?.()
+	}, [])
+
 	const stop = useCallback(() => {
 		requestIdRef.current += 1
-		if (isSupported) {
+		stopAudio()
+		if (deviceSupported) {
 			window.speechSynthesis.cancel()
 		}
 		setActiveMessageId(null)
 		setStatus('idle')
 		onEndedRef.current = null
-	}, [isSupported])
+	}, [deviceSupported, stopAudio])
+
+	const pause = useCallback(() => {
+		if (audioRef.current && !audioRef.current.paused) {
+			audioRef.current.pause()
+		} else if (deviceSupported) {
+			window.speechSynthesis.pause()
+		}
+		setStatus((current) => (current === 'playing' ? 'paused' : current))
+	}, [deviceSupported])
+
+	const resume = useCallback(() => {
+		if (audioRef.current?.src && audioRef.current.paused) {
+			void audioRef.current.play()
+		} else if (deviceSupported) {
+			window.speechSynthesis.resume()
+		}
+		setStatus((current) => (current === 'paused' ? 'playing' : current))
+	}, [deviceSupported])
+
+	/** Plays Cloudflare MeloTTS audio chunk by chunk, fetching the next while one plays. */
+	const speakWithCloudflare = useCallback(
+		async (
+			messageId: string,
+			speechText: string,
+			callbacks: { onError?: (error: Error) => void; suppressErrorState?: boolean },
+		) => {
+			stopAudio()
+			window.speechSynthesis?.cancel()
+			const requestId = requestIdRef.current + 1
+			requestIdRef.current = requestId
+			setActiveMessageId(messageId)
+			setStatus('loading')
+
+			const chunks = splitIntoUtterances(speechText, MAX_CLOUDFLARE_CHUNK_CHARS)
+			const audio = audioRef.current ?? new Audio()
+			audioRef.current = audio
+
+			try {
+				let pending = synthesizeWithCloudflare(preferences, chunks[0]!)
+				for (let index = 0; index < chunks.length; index += 1) {
+					const url = await pending
+					if (requestId !== requestIdRef.current) return
+					if (index + 1 < chunks.length) {
+						pending = synthesizeWithCloudflare(preferences, chunks[index + 1]!)
+						pending.catch(() => undefined)
+					}
+
+					await new Promise<void>((resolve, reject) => {
+						playbackDoneRef.current = resolve
+						audio.onended = () => resolve()
+						audio.onerror = () => reject(new Error('Could not play the generated audio.'))
+						audio.src = url
+						audio.play().then(
+							() => setStatus((current) => (current === 'paused' ? current : 'playing')),
+							reject,
+						)
+					})
+					if (requestId !== requestIdRef.current) return
+				}
+				finishPlayback(requestId)
+			} catch (speechError) {
+				if (requestId !== requestIdRef.current) return
+				const failure = speechError instanceof Error ? speechError : new Error('Speech failed.')
+				if (!callbacks.suppressErrorState) {
+					setError(failure.message)
+				}
+				callbacks.onError?.(failure)
+				finishPlayback(requestId)
+			}
+		},
+		[finishPlayback, preferences, stopAudio],
+	)
 
 	const clearError = useCallback(() => {
 		setError(null)
@@ -250,7 +346,7 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 				return
 			}
 
-			if (activeMessageId === messageId && status === 'playing') {
+			if (activeMessageId === messageId && (status === 'playing' || status === 'paused')) {
 				stop()
 				return
 			}
@@ -259,12 +355,25 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 				setError(null)
 			}
 			onEndedRef.current = onEnded ?? null
+			if (useCloudflare) {
+				void speakWithCloudflare(messageId, speechText, { onError, suppressErrorState })
+				return
+			}
 			speak(messageId, speechText, preferences.ttsVoiceName, {
 				onError,
 				suppressErrorState,
 			})
 		},
-		[activeMessageId, isSupported, preferences.ttsVoiceName, speak, status, stop],
+		[
+			activeMessageId,
+			isSupported,
+			preferences.ttsVoiceName,
+			speak,
+			speakWithCloudflare,
+			status,
+			stop,
+			useCloudflare,
+		],
 	)
 
 	const previewVoice = useCallback(
@@ -275,6 +384,10 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 			}
 			setError(null)
 			onEndedRef.current = null
+			if (useCloudflare) {
+				void speakWithCloudflare('voice-preview', 'Hello! This is how replies will sound when read aloud.', {})
+				return
+			}
 			speak(
 				'voice-preview',
 				'Hello! This is how replies will sound when read aloud.',
@@ -282,7 +395,7 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 				{},
 			)
 		},
-		[isSupported, speak],
+		[isSupported, speak, speakWithCloudflare, useCloudflare],
 	)
 
 	useEffect(() => {
@@ -299,9 +412,12 @@ export function useTextToSpeech({ preferences }: UseTextToSpeechOptions) {
 		status,
 		error,
 		isSupported,
+		engine: useCloudflare ? ('cloudflare' as const) : ('device' as const),
 		voices,
 		speakAssistantMessage,
 		previewVoice,
+		pause,
+		resume,
 		stop,
 		clearError,
 	}

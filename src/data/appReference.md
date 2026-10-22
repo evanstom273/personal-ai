@@ -24,7 +24,9 @@ Personal AI is a self-hosted progressive web app (PWA) with an optional **Capaci
 - Voice input and read-aloud using the browser's built-in speech features
 - **Import/export** of chats and documents
 
-The app does **not** generate images, music, audio, or video.
+- Optional **Cloudflare Workers AI** extras (Android app only): FLUX image generation, Whisper voice transcription, MeloTTS read-aloud, and BGE-M3 semantic memory search
+
+Music and video generation are not supported.
 
 All user data lives **locally in the browser** (IndexedDB). The user's Anthropic API key is stored on-device and sent directly from the browser to `api.anthropic.com` — there is no backend server.
 
@@ -105,6 +107,8 @@ Users can stop a reply (partial text is kept), regenerate the latest reply, or e
 
 **Memory tools** (`memoryTools.ts`): `search_memory`, `save_memory` (only when the user asks to remember something)
 
+**Image tool** (`executeAppToolCall.ts`, only when Cloudflare is set up in the Android app): `generate_image` — FLUX.1 [schnell], 1024×1024, only when the user explicitly asks for an image
+
 **Codebase tools** (`codebaseTools.ts`, read-only, when enabled in settings): `list_source_files`, `read_source_file`, `search_source_code`
 
 **Anthropic server tools** (when web search is on): `web_search` (up to 5 per reply, about $0.01 each) and `web_fetch` (up to 3 pages per reply, token cost only; can only fetch URLs that already appeared in the conversation)
@@ -149,26 +153,39 @@ After every N new messages in a conversation (`memoryArchiveInterval`), `memoryA
 
 ---
 
-## 10. Usage and cost
+## 10. Cloudflare Workers AI
+
+`src/services/cloudflare/` calls the Workers AI REST API with the user's account ID and API token (stored in IndexedDB preferences). Cloudflare's API has no CORS support, so requests go through Capacitor's native HTTP in the Android app; on the web/PWA these features are unavailable and Settings explains why.
+
+| Feature | Model |
+|---------|-------|
+| Image generation | `@cf/black-forest-labs/flux-1-schnell` |
+| Voice transcription | `@cf/openai/whisper-large-v3-turbo` |
+| Read-aloud | `@cf/myshell-ai/melotts` |
+| Semantic memory | `@cf/baai/bge-m3` (embeddings stored on each memory) |
+
+Usage is estimated in neurons per UTC day against the 10,000-neuron free allocation. Features pause when Cloudflare reports the allocation used up (error 3036) or the local estimate reaches 9,500 neurons, so paid inference is never used.
+
+## 11. Usage and cost
 
 Each response's token usage is turned into an estimated cost (Haiku 5.5: $0.10 input, $0.50 output, $0.01 cache read per million tokens; requests over 100k prompt tokens cost 5×; web search $10 per 1,000). Totals are stored per day. Settings → Usage shows today and this month, cost by feature, and optional daily/monthly limits that block new requests from this app (they cannot limit the API key elsewhere).
 
 ---
 
-## 11. Settings
+## 12. Settings
 
 | Tab | Contents |
 |-----|----------|
 | Profile | User name, AI name, behaviour instructions, mature-language toggle |
 | Memory | Archive interval, manual archive, clear memory |
-| API | Anthropic API key, key test, reasoning effort, web search toggle |
-| Usage | Cost totals, spending limits, pricing reference |
-| Voice | Speech input notes, read-aloud mode and voice |
+| API | Anthropic API key, key test, reasoning effort, web search toggle, Cloudflare credentials and feature switches |
+| Usage | Claude cost totals, Cloudflare neuron estimates, spending limits, pricing reference |
+| Voice | Speech input notes, read-aloud mode, engine (device or Cloudflare) and voice |
 | App | Dual-pane, notifications, reminders, changelog, app reference download, codebase inspection |
 
 ---
 
-## 12. PWA and Android
+## 13. PWA and Android
 
 - **Vite PWA plugin** with Workbox — precaches assets, `skipWaiting` + `clientsClaim`
 - **Capacitor 8** Android project in `/android`
@@ -176,7 +193,7 @@ Each response's token usage is turned into an estimated cost (Haiku 5.5: $0.10 i
 
 ---
 
-## 13. Key source files
+## 14. Key source files
 
 ```
 src/
@@ -189,6 +206,7 @@ src/
   hooks/                      — data and feature hooks
   services/
     claude/                   — API client, chat loop, prompts, pricing, web results
+    cloudflare/               — Workers AI client, image, transcription, speech, embeddings, neuron ledger
     usage/                    — local usage ledger and spending limits
     documents/ projects/ reminders/ memory/ library/ home/ scratchpad/
   storage/                    — IndexedDB types, db, storageService

@@ -84,6 +84,9 @@ export interface MemoryEntry {
 	category: MemoryCategory
 	archivedFromMessageCount: number
 	createdAt: number
+	/** Cloudflare embedding for semantic search; recomputed only if the model changes. */
+	embedding?: number[]
+	embeddingModel?: string
 }
 
 export const MEMORY_ARCHIVE_INTERVAL_OPTIONS = [5, 10, 15, 20] as const
@@ -96,6 +99,8 @@ export const TTS_READ_ALOUD_MODE_OPTIONS = [
 	'after_speech',
 	'always',
 ] as const
+
+export type TtsEngine = 'device' | 'cloudflare'
 
 export type TtsReadAloudMode = (typeof TTS_READ_ALOUD_MODE_OPTIONS)[number]
 
@@ -128,6 +133,12 @@ export interface UserPreferences {
 	/** 0 means no limit. */
 	monthlySpendLimitUsd: number
 	spendWarningsEnabled: boolean
+	cloudflareAccountId: string
+	cloudflareApiToken: string
+	cfImageGeneration: boolean
+	cfTranscription: boolean
+	cfSemanticMemory: boolean
+	ttsEngine: TtsEngine
 	userName: string
 	aiName: string
 	aiBehaviorInstructions: string
@@ -151,6 +162,12 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
 	dailySpendLimitUsd: 0,
 	monthlySpendLimitUsd: 0,
 	spendWarningsEnabled: true,
+	cloudflareAccountId: '',
+	cloudflareApiToken: '',
+	cfImageGeneration: true,
+	cfTranscription: true,
+	cfSemanticMemory: true,
+	ttsEngine: 'device',
 	userName: '',
 	aiName: '',
 	aiBehaviorInstructions: '',

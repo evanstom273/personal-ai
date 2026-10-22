@@ -1,5 +1,6 @@
 import { ExternalLink, Gauge, Save, Trash2 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
+import { CloudflareUsageSection } from '@/components/settings/CloudflareUsageSection'
 import { Button } from '@/components/ui/button'
 import { useUsageSummary } from '@/hooks/useUsageSummary'
 import { usePreferencesContext } from '@/providers/ChatProvider'
@@ -95,7 +96,7 @@ export function UsageSettings() {
 			<div>
 				<h2 className="text-lg font-semibold">Usage & spending</h2>
 				<p className="mt-1 text-sm text-muted-foreground">
-					Estimated Claude API costs from this device, worked out from the token
+					Estimated Claude API costs from this device (Cloudflare usage is shown separately below), worked out from the token
 					counts each response reports.
 				</p>
 			</div>
@@ -150,6 +151,8 @@ export function UsageSettings() {
 					</ul>
 				</section>
 			) : null}
+
+			<CloudflareUsageSection />
 
 			<section className="surface-panel space-y-4 rounded-xl p-5">
 				<div className="flex items-center gap-2">

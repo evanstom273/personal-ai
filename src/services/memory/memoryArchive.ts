@@ -2,6 +2,10 @@ import { completeJson } from '@/services/claude/complete'
 import { getConfiguredUserName } from '@/services/claude/systemInstruction'
 import { stripCitationMarkers } from '@/services/claude/webResults'
 import {
+	filterDuplicateMemories,
+	isSemanticMemoryAvailable,
+} from '@/services/memory/semanticMemory'
+import {
 	addMemoryEntries,
 	isMemoryCategory,
 	listMemoryEntries,
@@ -130,6 +134,21 @@ async function extractMemoryFromBatch(
 	return normalizeExtractedMemory(parsed)
 }
 
+/** Saves extracted memories, skipping ones that mean the same as existing memories when embeddings are available. */
+async function saveExtractedMemories(
+	preferences: UserPreferences,
+	items: Array<{ content: string; category: MemoryCategory; archivedFromMessageCount: number }>,
+) {
+	if (isSemanticMemoryAvailable(preferences)) {
+		try {
+			return await addMemoryEntries(await filterDuplicateMemories(preferences, items))
+		} catch {
+			// Cloudflare unavailable or allowance used up: store without semantic de-duplication.
+		}
+	}
+	return addMemoryEntries(items)
+}
+
 export function getUnarchivedMessages(
 	conversation: ConversationRecord,
 ): StoredMessage[] {
@@ -169,7 +188,8 @@ export async function archiveConversationIfNeeded(
 			)
 
 			if (extracted.length > 0) {
-				await addMemoryEntries(
+				await saveExtractedMemories(
+					preferences,
 					extracted.map((item) => ({
 						content: item.content,
 						category: item.category,
@@ -246,7 +266,8 @@ export async function runManualMemoryArchive(
 			)
 
 			if (extracted.length > 0) {
-				const added = await addMemoryEntries(
+				const added = await saveExtractedMemories(
+					preferences,
 					extracted.map((item) => ({
 						content: item.content,
 						category: item.category,

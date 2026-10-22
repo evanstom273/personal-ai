@@ -20,7 +20,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { CloudflareSettings } from '@/components/settings/CloudflareSettings'
 import { UsageSettings } from '@/components/settings/UsageSettings'
+import { getCloudflareAvailability } from '@/services/cloudflare/client'
 import { usePreferencesContext, useTextToSpeechContext, useConversationsContext, useChatGenerationContext } from '@/providers/ChatProvider'
 import type { SpeechVoiceOption } from '@/hooks/useTextToSpeech'
 import { CLAUDE_MODEL_ID, CLAUDE_MODEL_NAME } from '@/services/claude/constants'
@@ -34,6 +36,7 @@ import {
 	MEMORY_ARCHIVE_INTERVAL_OPTIONS,
 	type ClaudeEffort,
 	type MemoryArchiveInterval,
+	type TtsEngine,
 	type TtsReadAloudMode,
 } from '@/storage/types'
 import { isVoiceInputSupported } from '@/utils/speechRecognition'
@@ -475,6 +478,12 @@ export function SettingsPage() {
 						/>
 					) : null}
 
+					{activeTab === 'api' ? (
+						<div className="mt-5">
+							<CloudflareSettings />
+						</div>
+					) : null}
+
 					{activeTab === 'usage' ? <UsageSettings /> : null}
 
 					{activeTab === 'voice' ? (
@@ -483,6 +492,14 @@ export function SettingsPage() {
 							ttsVoiceName={ttsVoiceName}
 							voices={voices}
 							isSpeechOutputSupported={isSpeechOutputSupported}
+							ttsEngine={preferences.ttsEngine}
+							cloudflareSpeechReason={(() => {
+								const availability = getCloudflareAvailability(preferences)
+								return availability.ok ? null : availability.reason
+							})()}
+							onEngineChange={(value) =>
+								void savePreferences({ ...preferences, ttsEngine: value })
+							}
 							speechStatus={speechStatus}
 							onReadAloudModeChange={(value) =>
 								void handleTtsReadAloudModeChange(value)
@@ -940,6 +957,9 @@ function VoiceTab({
 	ttsVoiceName,
 	voices,
 	isSpeechOutputSupported,
+	ttsEngine,
+	cloudflareSpeechReason,
+	onEngineChange,
 	speechStatus,
 	onReadAloudModeChange,
 	onVoiceChange,
@@ -949,6 +969,9 @@ function VoiceTab({
 	ttsVoiceName: string
 	voices: SpeechVoiceOption[]
 	isSpeechOutputSupported: boolean
+	ttsEngine: TtsEngine
+	cloudflareSpeechReason: string | null
+	onEngineChange: (value: TtsEngine) => void
 	speechStatus: string
 	onReadAloudModeChange: (value: TtsReadAloudMode) => void
 	onVoiceChange: (value: string) => void
@@ -980,7 +1003,7 @@ function VoiceTab({
 					<Volume2 className="h-5 w-5 text-primary" />
 					<h3 className="text-sm font-medium">Read replies aloud</h3>
 				</div>
-				{isSpeechOutputSupported ? (
+				{isSpeechOutputSupported || !cloudflareSpeechReason ? (
 					<>
 						<p className="text-sm text-muted-foreground">
 							Uses your device&apos;s text-to-speech voices — free, offline-capable on
@@ -1006,8 +1029,30 @@ function VoiceTab({
 						</div>
 
 						<div className="space-y-2">
+							<label htmlFor="tts-engine" className="text-sm font-medium">
+								Voice engine
+							</label>
+							<select
+								id="tts-engine"
+								value={ttsEngine}
+								onChange={(event) => onEngineChange(event.target.value as TtsEngine)}
+								className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+							>
+								<option value="device">Device voice (free)</option>
+								<option value="cloudflare">Cloudflare MeloTTS (free daily allowance)</option>
+							</select>
+							<p className="text-xs text-muted-foreground">
+								{ttsEngine === 'cloudflare'
+									? cloudflareSpeechReason
+										? `${cloudflareSpeechReason} Until then the device voice is used.`
+										: 'MeloTTS speaks English with a single voice, at about 19 neurons per minute of audio. If the allowance runs out, read-aloud stops until it resets.'
+									: 'Uses the voices built into this device.'}
+							</p>
+						</div>
+
+						<div className="space-y-2">
 							<label htmlFor="tts-voice-name" className="text-sm font-medium">
-								Speaking voice
+								Speaking voice{ttsEngine === 'cloudflare' && !cloudflareSpeechReason ? ' (device engine only)' : ''}
 							</label>
 							<div className="flex flex-wrap items-center gap-3">
 								<select

@@ -1,19 +1,19 @@
 import { ConversationModeOverlay } from '@/components/chat/ConversationModeOverlay'
 import { VoiceModeControls } from '@/components/chat/VoiceModeControls'
 import { useConversationMode } from '@/hooks/useConversationMode'
-import { isSpeechSynthesisSupported } from '@/hooks/useTextToSpeech'
-import { useChatHeaderSlot, useVoiceSessionContext } from '@/providers/ChatProvider'
+import { useCloudflareTranscriber } from '@/hooks/useCloudflareTranscriber'
+import { useChatHeaderSlot, useTextToSpeechContext, useVoiceSessionContext } from '@/providers/ChatProvider'
 import type { StoredMessage } from '@/storage/types'
 import type { ChatSubmitPayload } from '@/types/chat'
 import { isVoiceInputSupported } from '@/utils/speechRecognition'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 interface ChatVoiceSessionProps {
 	conversationMessages: StoredMessage[]
 	isGenerating: boolean
 	hasApiKey: boolean
 	aiName: string
-	speechStatus: 'idle' | 'loading' | 'playing'
+	speechStatus: 'idle' | 'loading' | 'playing' | 'paused'
 	onSubmit: (payload: ChatSubmitPayload) => Promise<void>
 	onStopSpeech: () => void
 	onSpeakAssistantMessage: (options: {
@@ -49,14 +49,15 @@ export function ChatVoiceSession({
 		[onSubmit],
 	)
 
+	const transcribe = useCloudflareTranscriber()
 	const conversationMode = useConversationMode({
 		onSubmit: handleConversationSubmit,
 		onStopSpeaking: onStopSpeech,
+		transcribe,
 	})
 	// Hands-free mode needs both browser speech recognition and speech synthesis.
-	const [isVoiceModeAvailable] = useState(
-		() => isVoiceInputSupported() && isSpeechSynthesisSupported(),
-	)
+	const { isSupported: canSpeak } = useTextToSpeechContext()
+	const isVoiceModeAvailable = (Boolean(transcribe) || isVoiceInputSupported()) && canSpeak
 
 	useEffect(() => {
 		if (!isVoiceModeAvailable) {

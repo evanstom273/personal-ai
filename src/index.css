@@ -31,7 +31,9 @@
 
 :root {
 	--app-bottom-inset: env(safe-area-inset-bottom, 0px);
-	--bottom-nav-height: 4.75rem;
+	--bottom-nav-gap: max(calc(var(--app-bottom-inset) + 0.25rem), 0.5rem);
+	/* Height of the nav island plus the gap below it; floating controls sit above this. */
+	--bottom-nav-height: calc(4.875rem + var(--bottom-nav-gap));
 	--radius: 0.875rem;
 	--nav-island: #151820;
 	--nav-island-border: #242833;
@@ -131,7 +133,8 @@ body {
 	background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-.app-shell > * {
+/* Skip fixed children (scratchpad button/panel) so they don't take up space under the nav. */
+.app-shell > :not(.fixed) {
 	position: relative;
 	z-index: 1;
 }
@@ -213,7 +216,7 @@ body {
 .bottom-nav-dock {
 	/* Clear the gesture/safe area with a small gap, never less than 0.5rem. */
 	padding:
-		0.5rem 1rem max(calc(var(--app-bottom-inset) + 0.25rem), 0.5rem);
+		0.5rem 1rem var(--bottom-nav-gap);
 }
 
 .bottom-nav-island {

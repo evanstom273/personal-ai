@@ -4,6 +4,8 @@ import {
 	Columns,
 	Download,
 	ExternalLink,
+	Gauge,
+	Globe,
 	KeyRound,
 	Mic,
 	PlugZap,
@@ -18,26 +20,23 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { usePreferencesContext, useTextToSpeechContext, useMainConversationContext, useChatGenerationContext } from '@/providers/ChatProvider'
-import { validateApiKey } from '@/services/gemini/validate'
+import { UsageSettings } from '@/components/settings/UsageSettings'
+import { usePreferencesContext, useTextToSpeechContext, useConversationsContext, useChatGenerationContext } from '@/providers/ChatProvider'
+import type { SpeechVoiceOption } from '@/hooks/useTextToSpeech'
+import { CLAUDE_MODEL_ID, CLAUDE_MODEL_NAME } from '@/services/claude/constants'
+import { validateApiKey } from '@/services/claude/validate'
 import {
 	requestBackgroundReminderNotificationPermission,
 	syncBackgroundReminderNotifications,
 } from '@/services/reminders/reminderBackgroundNotifications'
 import { canUseNotificationTriggers } from '@/services/reminders/reminderNotificationTriggers'
-import { GEMINI_TTS_VOICES } from '@/services/gemini/ttsVoices'
-import { GEMINI_MODELS, MODEL_CATEGORY_LABELS } from '@/services/gemini/models'
 import {
 	MEMORY_ARCHIVE_INTERVAL_OPTIONS,
-	type GeminiApiKeySlot,
+	type ClaudeEffort,
 	type MemoryArchiveInterval,
 	type TtsReadAloudMode,
 } from '@/storage/types'
-import {
-	GEMINI_API_KEY_SLOT_LABELS,
-	getActiveGeminiApiKey,
-	hasGeminiApiKey,
-} from '@/storage/geminiApiKeys'
+import { isVoiceInputSupported } from '@/utils/speechRecognition'
 import {
 	canUseNotifications,
 	getNotificationPermission,
@@ -66,6 +65,7 @@ const SETTINGS_TABS = [
 	{ id: 'profile', label: 'Profile', icon: UserRound },
 	{ id: 'memory', label: 'Memory', icon: Brain },
 	{ id: 'api', label: 'API', icon: KeyRound },
+	{ id: 'usage', label: 'Usage', icon: Gauge },
 	{ id: 'voice', label: 'Voice', icon: Volume2 },
 	{ id: 'app', label: 'App', icon: Bell },
 ] as const
@@ -77,14 +77,16 @@ export function SettingsPage() {
 	const activeTab = resolveSettingsTabFromParams(searchParams)
 
 	const { preferences, savePreferences, isLoading } = usePreferencesContext()
-	const { conversation, saveConversation } = useMainConversationContext()
-	const { previewVoice, status: speechStatus } = useTextToSpeechContext()
+	const { conversation, setMemoryArchiveCursor } = useConversationsContext()
+	const {
+		previewVoice,
+		status: speechStatus,
+		voices,
+		isSupported: isSpeechOutputSupported,
+	} = useTextToSpeechContext()
 	const { memoryArchiveError, clearMemoryArchiveError } =
 		useChatGenerationContext()
-	const [paidApiKey, setPaidApiKey] = useState('')
-	const [freeApiKey, setFreeApiKey] = useState('')
-	const [activeApiKeySlot, setActiveApiKeySlot] =
-		useState<GeminiApiKeySlot>('paid')
+	const [apiKey, setApiKey] = useState('')
 	const [userName, setUserName] = useState('')
 	const [aiName, setAiName] = useState('')
 	const [aiBehaviorInstructions, setAiBehaviorInstructions] = useState('')
@@ -93,7 +95,7 @@ export function SettingsPage() {
 		useState<MemoryArchiveInterval>(20)
 	const [ttsReadAloudMode, setTtsReadAloudMode] =
 		useState<TtsReadAloudMode>('never')
-	const [ttsVoiceName, setTtsVoiceName] = useState('Kore')
+	const [ttsVoiceName, setTtsVoiceName] = useState('')
 	const [savedApiKey, setSavedApiKey] = useState(false)
 	const [savedIdentity, setSavedIdentity] = useState(false)
 	const [isSavingApiKey, setIsSavingApiKey] = useState(false)
@@ -120,9 +122,7 @@ export function SettingsPage() {
 
 	useEffect(() => {
 		if (!isLoading) {
-			setPaidApiKey(preferences.geminiApiKeyPaid)
-			setFreeApiKey(preferences.geminiApiKeyFree)
-			setActiveApiKeySlot(preferences.activeGeminiApiKeySlot)
+			setApiKey(preferences.anthropicApiKey)
 			setUserName(preferences.userName)
 			setAiName(preferences.aiName)
 			setAiBehaviorInstructions(preferences.aiBehaviorInstructions)
@@ -142,15 +142,13 @@ export function SettingsPage() {
 		setSearchParams(tab === 'profile' ? {} : { tab })
 	}
 
-	async function handleSaveApiKeys(): Promise<void> {
+	async function handleSaveApiKey(): Promise<void> {
 		setIsSavingApiKey(true)
 		setSavedApiKey(false)
 		try {
 			await savePreferences({
 				...preferences,
-				geminiApiKeyPaid: paidApiKey.trim(),
-				geminiApiKeyFree: freeApiKey.trim(),
-				activeGeminiApiKeySlot: activeApiKeySlot,
+				anthropicApiKey: apiKey.trim(),
 			})
 			setSavedApiKey(true)
 		} finally {
@@ -158,17 +156,12 @@ export function SettingsPage() {
 		}
 	}
 
-	async function handleActiveApiKeySlotChange(slot: GeminiApiKeySlot): Promise<void> {
-		setActiveApiKeySlot(slot)
-		setSavedApiKey(false)
-		setValidationMessage(null)
-		setValidationOk(null)
-		await savePreferences({
-			...preferences,
-			geminiApiKeyPaid: paidApiKey.trim(),
-			geminiApiKeyFree: freeApiKey.trim(),
-			activeGeminiApiKeySlot: slot,
-		})
+	async function handleClaudeEffortChange(value: ClaudeEffort): Promise<void> {
+		await savePreferences({ ...preferences, claudeEffort: value })
+	}
+
+	async function handleWebSearchChange(value: boolean): Promise<void> {
+		await savePreferences({ ...preferences, webSearchEnabled: value })
 	}
 
 	async function handleSaveIdentity(): Promise<void> {
@@ -283,7 +276,7 @@ export function SettingsPage() {
 		const estimatedBatches = Math.ceil(unarchivedCount / batchSize)
 		if (estimatedBatches > MANUAL_ARCHIVE_CONFIRM_BATCHES) {
 			const confirmed = window.confirm(
-				`Archive now will run about ${estimatedBatches} Gemini API calls to scan ${unarchivedCount} messages. Continue?`,
+				`Archive now will run about ${estimatedBatches} Claude API calls to scan ${unarchivedCount} messages. Continue?`,
 			)
 			if (!confirmed) {
 				return
@@ -295,7 +288,7 @@ export function SettingsPage() {
 		clearMemoryArchiveError()
 		try {
 			const { conversation: updated, result } = await runManualMemoryArchive(
-				getActiveGeminiApiKey(preferences),
+				preferences.anthropicApiKey,
 				conversation,
 				preferences,
 			)
@@ -303,7 +296,7 @@ export function SettingsPage() {
 			if (
 				updated.memoryArchiveCursor !== (conversation.memoryArchiveCursor ?? 0)
 			) {
-				await saveConversation(updated)
+				await setMemoryArchiveCursor(updated.id, updated.memoryArchiveCursor)
 			}
 
 			if (result.messagesArchived === 0) {
@@ -342,7 +335,7 @@ export function SettingsPage() {
 			}
 
 			setNotificationMessage(
-				'Notifications are blocked. Enable them in Android settings for Gemini Chat.',
+				'Notifications are blocked. Enable them in Android settings for Personal AI.',
 			)
 			return
 		}
@@ -380,12 +373,7 @@ export function SettingsPage() {
 		setValidationMessage(null)
 		setValidationOk(null)
 		try {
-			const result = await validateApiKey(getActiveGeminiApiKey({
-				...preferences,
-				geminiApiKeyPaid: paidApiKey.trim(),
-				geminiApiKeyFree: freeApiKey.trim(),
-				activeGeminiApiKeySlot: activeApiKeySlot,
-			}))
+			const result = await validateApiKey(apiKey)
 			setValidationOk(result.ok)
 			setValidationMessage(result.message)
 		} finally {
@@ -452,7 +440,7 @@ export function SettingsPage() {
 							unarchivedMessageCount={
 								conversation ? getUnarchivedMessages(conversation).length : 0
 							}
-							hasApiKey={hasGeminiApiKey(preferences)}
+							hasApiKey={preferences.anthropicApiKey.trim().length > 0}
 							isClearingMemory={isClearingMemory}
 							isArchivingMemory={isArchivingMemory}
 							actionMessage={memoryActionMessage}
@@ -466,39 +454,35 @@ export function SettingsPage() {
 
 					{activeTab === 'api' ? (
 						<ApiTab
-							paidApiKey={paidApiKey}
-							freeApiKey={freeApiKey}
-							activeApiKeySlot={activeApiKeySlot}
+							apiKey={apiKey}
 							savedApiKey={savedApiKey}
 							isSavingApiKey={isSavingApiKey}
 							isValidating={isValidating}
 							validationMessage={validationMessage}
 							validationOk={validationOk}
-							onPaidApiKeyChange={(value) => {
-								setPaidApiKey(value)
+							claudeEffort={preferences.claudeEffort}
+							webSearchEnabled={preferences.webSearchEnabled}
+							onApiKeyChange={(value) => {
+								setApiKey(value)
 								setSavedApiKey(false)
 								setValidationMessage(null)
 								setValidationOk(null)
 							}}
-							onFreeApiKeyChange={(value) => {
-								setFreeApiKey(value)
-								setSavedApiKey(false)
-								setValidationMessage(null)
-								setValidationOk(null)
-							}}
-							onActiveApiKeySlotChange={(slot) =>
-								void handleActiveApiKeySlotChange(slot)
-							}
-							onSave={() => void handleSaveApiKeys()}
+							onSave={() => void handleSaveApiKey()}
 							onValidate={() => void handleValidate()}
+							onClaudeEffortChange={(value) => void handleClaudeEffortChange(value)}
+							onWebSearchChange={(value) => void handleWebSearchChange(value)}
 						/>
 					) : null}
+
+					{activeTab === 'usage' ? <UsageSettings /> : null}
 
 					{activeTab === 'voice' ? (
 						<VoiceTab
 							ttsReadAloudMode={ttsReadAloudMode}
 							ttsVoiceName={ttsVoiceName}
-							hasApiKey={hasGeminiApiKey(preferences)}
+							voices={voices}
+							isSpeechOutputSupported={isSpeechOutputSupported}
 							speechStatus={speechStatus}
 							onReadAloudModeChange={(value) =>
 								void handleTtsReadAloudModeChange(value)
@@ -582,7 +566,7 @@ function ProfileTab({
 					<FieldGroup
 						icon={Sparkles}
 						label="AI name"
-						hint="Shown in the app and sent to Gemini."
+						hint="Shown in the app and used in the assistant's instructions."
 					>
 						<input
 							value={aiName}
@@ -616,10 +600,9 @@ function ProfileTab({
 					<span>
 						<span className="block font-medium">Allow mature content</span>
 						<span className="mt-1 block text-muted-foreground">
-							Matches your tone (including swearing), relaxes adjustable Gemini
-							filters for chat, image, and music, and allows adult people in
-							generated images. Illegal content is always blocked. Turn off for
-							stricter filtering.
+							Lets the assistant match your tone, including swearing and mature
+							themes. Anthropic&apos;s usage policies still apply. Turn off for a
+							cleaner, more neutral tone.
 						</span>
 					</span>
 				</label>
@@ -674,8 +657,9 @@ function MemoryTab({
 				<p className="text-sm text-muted-foreground">
 					After this many new chat messages, the assistant reads the batch and
 					archives durable facts into Memory. Lower values update more often;
-					higher values wait for more context per pass. Archival uses Gemini 3.6
-					Flash on paid keys, or your Flash-Lite chat model on free-tier keys.
+					higher values wait for more context per pass. Archival uses {CLAUDE_MODEL_NAME}
+					at low effort — typically a fraction of a cent per batch. Only the
+					current conversation is scanned.
 				</p>
 
 				<div className="space-y-3">
@@ -739,7 +723,7 @@ function MemoryTab({
 				</div>
 				{!hasApiKey ? (
 					<p className="text-xs text-muted-foreground">
-						Add a Gemini API key in the API tab to run manual archive.
+						Add your Anthropic API key in the API tab to run manual archive.
 					</p>
 				) : null}
 				{actionMessage ? (
@@ -780,133 +764,98 @@ function MemoryTab({
 	)
 }
 
+const EFFORT_LABELS: Record<ClaudeEffort, { label: string; description: string }> = {
+	low: { label: 'Low (recommended)', description: 'Fastest and cheapest. Good for everyday chat.' },
+	medium: { label: 'Medium', description: 'More careful reasoning; uses more output tokens.' },
+	high: { label: 'High', description: 'Most thorough; slower and costs more per reply.' },
+}
+
 function ApiTab({
-	paidApiKey,
-	freeApiKey,
-	activeApiKeySlot,
+	apiKey,
 	savedApiKey,
 	isSavingApiKey,
 	isValidating,
 	validationMessage,
 	validationOk,
-	onPaidApiKeyChange,
-	onFreeApiKeyChange,
-	onActiveApiKeySlotChange,
+	claudeEffort,
+	webSearchEnabled,
+	onApiKeyChange,
 	onSave,
 	onValidate,
+	onClaudeEffortChange,
+	onWebSearchChange,
 }: {
-	paidApiKey: string
-	freeApiKey: string
-	activeApiKeySlot: GeminiApiKeySlot
+	apiKey: string
 	savedApiKey: boolean
 	isSavingApiKey: boolean
 	isValidating: boolean
 	validationMessage: string | null
 	validationOk: boolean | null
-	onPaidApiKeyChange: (value: string) => void
-	onFreeApiKeyChange: (value: string) => void
-	onActiveApiKeySlotChange: (slot: GeminiApiKeySlot) => void
+	claudeEffort: ClaudeEffort
+	webSearchEnabled: boolean
+	onApiKeyChange: (value: string) => void
 	onSave: () => void
 	onValidate: () => void
+	onClaudeEffortChange: (value: ClaudeEffort) => void
+	onWebSearchChange: (value: boolean) => void
 }) {
-	const activeKeyDraft =
-		activeApiKeySlot === 'paid' ? paidApiKey.trim() : freeApiKey.trim()
-
 	return (
 		<div className="space-y-5">
 			<TabIntro
-				title="API & models"
-				description="Store a paid and a free key on-device, then switch which one the app uses."
+				title="API & model"
+				description="Your Anthropic API key and how the assistant uses it."
 			/>
 
 			<section className="surface-panel space-y-4 rounded-xl p-5">
 				<FieldGroup
 					icon={KeyRound}
-					label="Active API key"
-					hint="The app uses this key for chat, voice, memory archival, and document AI."
-				>
-					<select
-						value={activeApiKeySlot}
-						onChange={(event) =>
-							onActiveApiKeySlotChange(event.target.value as GeminiApiKeySlot)
-						}
-						className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-					>
-						{(Object.keys(GEMINI_API_KEY_SLOT_LABELS) as GeminiApiKeySlot[]).map(
-							(slot) => {
-								const slotHasKey =
-									slot === 'paid'
-										? paidApiKey.trim().length > 0
-										: freeApiKey.trim().length > 0
-
-								return (
-									<option key={slot} value={slot}>
-										{GEMINI_API_KEY_SLOT_LABELS[slot]}
-										{slotHasKey ? '' : ' (not saved)'}
-									</option>
-								)
-							},
-						)}
-					</select>
-				</FieldGroup>
-
-				<FieldGroup
-					label="Paid key"
-					hint="Your Tier 2 or billing-enabled key — Flash Lite, web search allowance, etc."
+					label="Anthropic API key"
+					hint="Used for chat, memory archiving, document AI, and the scratchpad."
 				>
 					<input
 						type="password"
-						value={paidApiKey}
-						onChange={(event) => onPaidApiKeyChange(event.target.value)}
-						placeholder="AIza..."
+						value={apiKey}
+						onChange={(event) => onApiKeyChange(event.target.value)}
+						placeholder="sk-ant-..."
 						autoComplete="off"
-						className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-					/>
-				</FieldGroup>
-
-				<FieldGroup
-					label="Free key"
-					hint="A separate free-tier key — switch to it when you want daily quotas instead of paid balance."
-				>
-					<input
-						type="password"
-						value={freeApiKey}
-						onChange={(event) => onFreeApiKeyChange(event.target.value)}
-						placeholder="AIza..."
-						autoComplete="off"
+						spellCheck={false}
 						className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
 					/>
 				</FieldGroup>
 
 				<p className="text-xs text-muted-foreground">
-					Get keys from{' '}
+					Create a key in the{' '}
 					<a
-						href="https://aistudio.google.com/apikey"
+						href="https://platform.claude.com/settings/keys"
 						target="_blank"
 						rel="noreferrer"
 						className="inline-flex items-center gap-1 text-primary hover:underline"
 					>
-						Google AI Studio
+						Claude Console
 						<ExternalLink className="h-3.5 w-3.5" />
 					</a>
-					. Keys never leave this device except when calling Gemini.
+					. The key is stored only on this device (in the browser&apos;s IndexedDB)
+					and is sent directly to api.anthropic.com — there is no server in
+					between. Anyone with access to this device and browser profile could
+					read it, so use a key you can revoke, ideally in its own workspace with a
+					spend limit.
 				</p>
 
 				<div className="flex flex-wrap items-center gap-3">
 					<Button onClick={onSave} disabled={isSavingApiKey}>
 						<Save className="h-4 w-4" />
-						{isSavingApiKey ? 'Saving…' : 'Save keys'}
+						{isSavingApiKey ? 'Saving…' : 'Save key'}
 					</Button>
 					<Button
 						variant="outline"
 						onClick={onValidate}
-						disabled={isValidating || !activeKeyDraft}
+						disabled={isValidating || !apiKey.trim()}
 					>
 						<PlugZap className="h-4 w-4" />
-						{isValidating ? 'Validating…' : 'Validate active key'}
+						{isValidating ? 'Checking…' : 'Test key'}
 					</Button>
 					{savedApiKey ? (
-						<span className="text-sm text-primary">Keys saved</span>
+						<span className="text-sm text-primary">Key saved</span>
 					) : null}
 				</div>
 
@@ -921,46 +870,66 @@ function ApiTab({
 				) : null}
 			</section>
 
-			<section className="surface-panel space-y-3 rounded-xl p-5">
-				<h3 className="text-sm font-medium">Web search</h3>
+			<section className="surface-panel space-y-4 rounded-xl p-5">
+				<div className="flex items-center gap-2">
+					<Sparkles className="h-5 w-5 text-primary" />
+					<h3 className="text-sm font-medium">Model</h3>
+				</div>
 				<p className="text-sm text-muted-foreground">
-					Enable <span className="font-medium text-foreground">Web search</span>{' '}
-					from the + menu in chat. Gemini 3 includes about 5,000 search queries
-					per month free, then roughly $14 per 1,000 queries — billed per search
-					the model runs, not per chat message.
+					Every conversation uses{' '}
+					<span className="font-medium text-foreground">{CLAUDE_MODEL_NAME}</span>{' '}
+					(<code className="text-xs">{CLAUDE_MODEL_ID}</code>) — fast, low-cost, and able
+					to read images, PDFs, and code.
 				</p>
+				<div className="space-y-2">
+					<label htmlFor="claude-effort" className="text-sm font-medium">
+						Reasoning effort
+					</label>
+					<select
+						id="claude-effort"
+						value={claudeEffort}
+						onChange={(event) => onClaudeEffortChange(event.target.value as ClaudeEffort)}
+						className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+					>
+						{(Object.keys(EFFORT_LABELS) as ClaudeEffort[]).map((effort) => (
+							<option key={effort} value={effort}>
+								{EFFORT_LABELS[effort].label}
+							</option>
+						))}
+					</select>
+					<p className="text-xs text-muted-foreground">
+						{EFFORT_LABELS[claudeEffort].description}
+					</p>
+				</div>
 			</section>
 
 			<section className="surface-panel space-y-4 rounded-xl p-5">
-				<h3 className="text-sm font-medium">Available models</h3>
-				<p className="text-sm text-muted-foreground">
-					Say &quot;generate an image of…&quot; or &quot;generate music&quot; and
-					the app uses your chosen model for that type.
-				</p>
-				<div className="space-y-4">
-					{(['chat', 'image', 'music'] as const).map((category) => (
-						<div key={category}>
-							<h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-								{MODEL_CATEGORY_LABELS[category]}
-							</h4>
-							<ul className="space-y-2">
-								{GEMINI_MODELS.filter((model) => model.category === category).map(
-									(model) => (
-										<li
-											key={model.id}
-											className="rounded-lg border border-border/60 bg-secondary/40 px-3 py-2 text-sm"
-										>
-											<p className="font-medium">{model.name}</p>
-											<p className="text-xs text-muted-foreground">
-												{model.id} — {model.description}
-											</p>
-										</li>
-									),
-								)}
-							</ul>
-						</div>
-					))}
+				<div className="flex items-center gap-2">
+					<Globe className="h-5 w-5 text-primary" />
+					<h3 className="text-sm font-medium">Web search</h3>
 				</div>
+				<label className="flex items-start gap-3 rounded-lg border border-border/60 px-3 py-3 text-sm">
+					<input
+						type="checkbox"
+						checked={webSearchEnabled}
+						onChange={(event) => onWebSearchChange(event.target.checked)}
+						className="mt-0.5"
+					/>
+					<span>
+						<span className="block font-medium">Let Claude search the web</span>
+						<span className="mt-1 block text-muted-foreground">
+							Claude decides when a question needs current information, then
+							searches and reads pages using Anthropic&apos;s built-in web tools, with
+							sources linked under the reply. You can also toggle this from the +
+							menu in chat.
+						</span>
+					</span>
+				</label>
+				<p className="text-xs text-muted-foreground">
+					Searches cost $10 per 1,000 (about one cent each) plus the tokens of the
+					results; reading a page costs only its tokens. The app allows up to 5
+					searches and 3 page reads per reply.
+				</p>
 			</section>
 		</div>
 	)
@@ -969,7 +938,8 @@ function ApiTab({
 function VoiceTab({
 	ttsReadAloudMode,
 	ttsVoiceName,
-	hasApiKey,
+	voices,
+	isSpeechOutputSupported,
 	speechStatus,
 	onReadAloudModeChange,
 	onVoiceChange,
@@ -977,17 +947,20 @@ function VoiceTab({
 }: {
 	ttsReadAloudMode: TtsReadAloudMode
 	ttsVoiceName: string
-	hasApiKey: boolean
+	voices: SpeechVoiceOption[]
+	isSpeechOutputSupported: boolean
 	speechStatus: string
 	onReadAloudModeChange: (value: TtsReadAloudMode) => void
 	onVoiceChange: (value: string) => void
 	onPreview: () => void
 }) {
+	const voiceInputSupported = isVoiceInputSupported()
+
 	return (
 		<div className="space-y-5">
 			<TabIntro
 				title="Voice"
-				description="Speech-to-text input and text-to-speech playback for assistant replies."
+				description="Speech input and read-aloud, using your device's built-in speech features."
 			/>
 
 			<section className="surface-panel space-y-3 rounded-xl p-5">
@@ -996,91 +969,80 @@ function VoiceTab({
 					<h3 className="text-sm font-medium">Voice input</h3>
 				</div>
 				<p className="text-sm text-muted-foreground">
-					On desktop, the browser&apos;s speech recognition is used when
-					available. On Android and installed apps, a short clip is recorded and
-					transcribed with Gemini 3.6 Flash (always — independent of your chat
-					model).
-				</p>
-				<p className="text-sm text-muted-foreground">
-					Tap the mic, speak, then tap Continue. If voice input fails in an
-					installed app, try opening the site in Chrome instead of the home-screen
-					shortcut.
+					{voiceInputSupported
+						? 'Tap the mic, speak, then tap Continue. Speech is recognised by your browser, so it costs nothing extra.'
+						: 'Speech recognition is not available in this browser or app, so the mic button is hidden. Chrome and Edge support it; some Android app views do not.'}
 				</p>
 			</section>
 
 			<section className="surface-panel space-y-4 rounded-xl p-5">
 				<div className="flex items-center gap-2">
 					<Volume2 className="h-5 w-5 text-primary" />
-					<h3 className="text-sm font-medium">Voice output</h3>
+					<h3 className="text-sm font-medium">Read replies aloud</h3>
 				</div>
-				<p className="text-sm text-muted-foreground">
-					Gemini TTS reads replies aloud. Chat text is always shown — speech is
-					optional on top.
-				</p>
-
-				<div className="space-y-2">
-					<label htmlFor="tts-read-aloud-mode" className="text-sm font-medium">
-						Read responses aloud
-					</label>
-					<select
-						id="tts-read-aloud-mode"
-						value={ttsReadAloudMode}
-						onChange={(event) => {
-							onReadAloudModeChange(event.target.value as TtsReadAloudMode)
-						}}
-						className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-					>
-						<option value="never">Never</option>
-						<option value="after_speech">When I use the microphone</option>
-						<option value="always">Always</option>
-					</select>
-					{ttsReadAloudMode === 'always' ? (
-						<p className="text-xs text-muted-foreground">
-							Always generates a separate TTS API call for every assistant reply,
-							which adds to your Gemini bill.
+				{isSpeechOutputSupported ? (
+					<>
+						<p className="text-sm text-muted-foreground">
+							Uses your device&apos;s text-to-speech voices — free, offline-capable on
+							most devices. Chat text is always shown; speech is optional on top.
 						</p>
-					) : null}
-				</div>
 
-				<div className="space-y-2">
-					<label htmlFor="tts-voice-name" className="text-sm font-medium">
-						Speaking voice
-					</label>
-					<div className="flex flex-wrap items-center gap-3">
-						<select
-							id="tts-voice-name"
-							value={ttsVoiceName}
-							onChange={(event) => onVoiceChange(event.target.value)}
-							className="min-w-0 flex-1 rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
-						>
-							{GEMINI_TTS_VOICES.map((voice) => (
-								<option key={voice.name} value={voice.name}>
-									{voice.name} — {voice.description}
-								</option>
-							))}
-						</select>
-						<Button
-							type="button"
-							variant="outline"
-							disabled={
-								!hasApiKey ||
-								speechStatus === 'loading' ||
-								speechStatus === 'playing'
-							}
-							onClick={onPreview}
-						>
-							<Volume2 className="h-4 w-4" />
-							{speechStatus === 'loading' ? 'Loading…' : 'Preview'}
-						</Button>
-					</div>
+						<div className="space-y-2">
+							<label htmlFor="tts-read-aloud-mode" className="text-sm font-medium">
+								Read responses aloud
+							</label>
+							<select
+								id="tts-read-aloud-mode"
+								value={ttsReadAloudMode}
+								onChange={(event) => {
+									onReadAloudModeChange(event.target.value as TtsReadAloudMode)
+								}}
+								className="w-full rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+							>
+								<option value="never">Never</option>
+								<option value="after_speech">When I use the microphone</option>
+								<option value="always">Always</option>
+							</select>
+						</div>
+
+						<div className="space-y-2">
+							<label htmlFor="tts-voice-name" className="text-sm font-medium">
+								Speaking voice
+							</label>
+							<div className="flex flex-wrap items-center gap-3">
+								<select
+									id="tts-voice-name"
+									value={ttsVoiceName}
+									onChange={(event) => onVoiceChange(event.target.value)}
+									className="min-w-0 flex-1 rounded-lg surface-input px-3 py-2 text-sm outline-none ring-ring focus:ring-2"
+								>
+									<option value="">Device default</option>
+									{voices.map((voice) => (
+										<option key={voice.id} value={voice.id}>
+											{voice.name} ({voice.lang})
+										</option>
+									))}
+								</select>
+								<Button
+									type="button"
+									variant="outline"
+									disabled={speechStatus === 'playing'}
+									onClick={onPreview}
+								>
+									<Volume2 className="h-4 w-4" />
+									Preview
+								</Button>
+							</div>
+							<p className="text-sm text-muted-foreground">
+								Tap Listen under a reply to hear it.
+							</p>
+						</div>
+					</>
+				) : (
 					<p className="text-sm text-muted-foreground">
-						Uses{' '}
-						<span className="font-medium text-foreground">
-							gemini-3.1-flash-tts-preview
-						</span>{' '}
-						with streaming playback. Tap Listen on a reply for manual playback.
+						Text-to-speech is not available in this browser or app view.
 					</p>
-				</div>
+				)}
 			</section>
 
 			<section className="surface-panel space-y-3 rounded-xl p-5">
@@ -1089,8 +1051,8 @@ function VoiceTab({
 					<h3 className="text-sm font-medium">Voice conversation</h3>
 				</div>
 				<p className="text-sm text-muted-foreground">
-					In chat, tap the phone icon next to your assistant&apos;s name for
-					Conversation Mode. A short explanation appears before you start.
+					When your device supports both speech input and read-aloud, a phone icon
+					next to your assistant&apos;s name starts hands-free Conversation Mode.
 				</p>
 			</section>
 		</div>

@@ -1,19 +1,9 @@
-import { geminiFetch } from '@/services/gemini/client'
-import { applySafetySettingsToRequestBody } from '@/services/gemini/safetySettings'
+import { completeJson } from '@/services/claude/complete'
 import {
 	buildSystemInstruction,
 	getConfiguredUserName,
-} from '@/services/gemini/systemInstruction'
-import { MAX_MEMORY_ARCHIVE_OUTPUT_TOKENS } from '@/services/gemini/constants'
+} from '@/services/claude/systemInstruction'
 import type { UserPreferences } from '@/storage/types'
-
-interface GenerateContentResponse {
-	candidates?: Array<{
-		content?: {
-			parts?: Array<{ text?: string }>
-		}
-	}>
-}
 
 export interface OrganizedScratchpadDocument {
 	title: string
@@ -25,85 +15,62 @@ export interface ExtractedScratchpadTasks {
 	tasks: Array<{ title: string; note?: string }>
 }
 
-function extractResponseText(response: GenerateContentResponse): string {
-	return (
-		response.candidates?.[0]?.content?.parts
-			?.map((part) => part.text ?? '')
-			.join('')
-			.trim() ?? ''
-	)
+const ORGANIZED_DOCUMENT_SCHEMA = {
+	type: 'object',
+	properties: {
+		title: { type: 'string' },
+		content: { type: 'string' },
+	},
+	required: ['title', 'content'],
+	additionalProperties: false,
 }
 
-function parseJsonFromModelText<T>(text: string): T | null {
-	const trimmed = text.trim()
-	const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
-	const jsonText = fenced?.[1]?.trim() ?? trimmed
-
-	try {
-		return JSON.parse(jsonText) as T
-	} catch {
-		return null
-	}
+const EXTRACTED_TASKS_SCHEMA = {
+	type: 'object',
+	properties: {
+		projectTitle: { type: 'string' },
+		tasks: {
+			type: 'array',
+			items: {
+				type: 'object',
+				properties: {
+					title: { type: 'string' },
+					note: { type: 'string' },
+				},
+				required: ['title', 'note'],
+				additionalProperties: false,
+			},
+		},
+	},
+	required: ['projectTitle', 'tasks'],
+	additionalProperties: false,
 }
 
 async function generateScratchpadJson<T>(
 	request: {
 		apiKey: string
-		modelId: string
 		preferences: UserPreferences
 		prompt: string
+		schema: Record<string, unknown>
 	},
 ): Promise<T> {
 	const systemInstruction = [
 		buildSystemInstruction(request.preferences),
 		`You help ${getConfiguredUserName(request.preferences)} organize quick-capture scratchpad notes.`,
-		'Respond with valid JSON only. No markdown fences or commentary.',
 	].join('\n\n')
 
-	const body = applySafetySettingsToRequestBody(
-		{
-			systemInstruction: {
-				parts: [{ text: systemInstruction }],
-			},
-			contents: [
-				{
-					role: 'user',
-					parts: [{ text: request.prompt }],
-				},
-			],
-			generationConfig: {
-				temperature: 0.4,
-				maxOutputTokens: MAX_MEMORY_ARCHIVE_OUTPUT_TOKENS,
-			},
-		},
-		request.preferences.allowMatureContent ?? true,
-	)
-
-	const response = await geminiFetch<GenerateContentResponse>(
-		request.apiKey,
-		`/models/${request.modelId}:generateContent`,
-		{
-			method: 'POST',
-			body: JSON.stringify(body),
-		},
-	)
-
-	const text = extractResponseText(response)
-	if (!text) {
-		throw new Error('Gemini returned an empty response.')
-	}
-
-	const parsed = parseJsonFromModelText<T>(text)
-	if (!parsed) {
-		throw new Error('Could not parse the AI response.')
-	}
-
-	return parsed
+	return completeJson<T>({
+		apiKey: request.apiKey,
+		preferences: request.preferences,
+		feature: 'scratchpad',
+		system: systemInstruction,
+		prompt: request.prompt,
+		schema: request.schema,
+	})
 }
 
 export async function organizeScratchpadIntoDocument(request: {
 	apiKey: string
-	modelId: string
 	preferences: UserPreferences
 	rawText: string
 }): Promise<OrganizedScratchpadDocument> {
@@ -116,8 +83,7 @@ export async function organizeScratchpadIntoDocument(request: {
 		'Turn the following raw scratchpad notes into a structured Markdown document.',
 		'Use clear headings, bullet lists, and short paragraphs where appropriate.',
 		'Preserve all important details; do not invent facts.',
-		'Return JSON: { "title": string, "content": string }',
-		'The content field must be Markdown only.',
+		'Give the document a short title. The content field must be Markdown only.',
 		'',
 		'Scratchpad notes:',
 		rawText,
@@ -128,9 +94,9 @@ export async function organizeScratchpadIntoDocument(request: {
 		content?: string
 	}>({
 		apiKey: request.apiKey,
-		modelId: request.modelId,
 		preferences: request.preferences,
 		prompt,
+		schema: ORGANIZED_DOCUMENT_SCHEMA,
 	})
 
 	const title = parsed.title?.trim() || 'Organized notes'
@@ -144,7 +110,6 @@ export async function organizeScratchpadIntoDocument(request: {
 
 export async function extractScratchpadTasks(request: {
 	apiKey: string
-	modelId: string
 	preferences: UserPreferences
 	rawText: string
 }): Promise<ExtractedScratchpadTasks> {
@@ -156,8 +121,7 @@ export async function extractScratchpadTasks(request: {
 	const prompt = [
 		'Extract actionable tasks from the following scratchpad notes.',
 		'Infer a short project title that groups these tasks.',
-		'Return JSON: { "projectTitle": string, "tasks": [{ "title": string, "note"?: string }] }',
-		'Each task title should be a concise action item.',
+		'Each task title should be a concise action item. Use an empty note when there is nothing to add.',
 		'Include at least one task when any action is implied.',
 		'',
 		'Scratchpad notes:',
@@ -169,9 +133,9 @@ export async function extractScratchpadTasks(request: {
 		tasks?: Array<{ title?: string; note?: string }>
 	}>({
 		apiKey: request.apiKey,
-		modelId: request.modelId,
 		preferences: request.preferences,
 		prompt,
+		schema: EXTRACTED_TASKS_SCHEMA,
 	})
 
 	const tasks = (parsed.tasks ?? [])

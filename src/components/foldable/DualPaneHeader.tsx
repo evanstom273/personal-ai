@@ -1,16 +1,14 @@
 import { ArrowLeftRight, X, FileText, Kanban, Layers } from 'lucide-react'
-import { useCallback } from 'react'
 import { ChatConversationActions } from '@/components/chat/ChatConversationActions'
 import { Button } from '@/components/ui/button'
 import { formatAppVersionLabel } from '@/data/changelog'
 import { useFoldablePane } from '@/hooks/useFoldablePane'
 import {
-	useChatGenerationContext,
 	useChatHeaderSlot,
-	useMainConversationContext,
+	useConversationsContext,
 	usePreferencesContext,
 } from '@/providers/ChatProvider'
-import { getConfiguredAiName } from '@/services/gemini/systemInstruction'
+import { getConfiguredAiName } from '@/services/claude/systemInstruction'
 
 function getPaneTitle(route: string, aiName: string): { title: string; icon: typeof Layers } {
 	if (!route || route === '/chat') return { title: aiName, icon: Layers }
@@ -25,8 +23,7 @@ function getPaneTitle(route: string, aiName: string): { title: string; icon: typ
 
 export function DualPaneHeader() {
 	const { preferences } = usePreferencesContext()
-	const { conversation, clearConversation, replaceConversation } = useMainConversationContext()
-	const { isGenerating, stopGeneration } = useChatGenerationContext()
+	const { conversation } = useConversationsContext()
 	const { slot: chatHeaderVoiceSlot } = useChatHeaderSlot()
 	const {
 		pane1Route,
@@ -40,18 +37,6 @@ export function DualPaneHeader() {
 	const aiName = getConfiguredAiName(preferences)
 	const pane1Info = getPaneTitle(pane1Route, aiName)
 	const pane2Info = getPaneTitle(pane2Route, aiName)
-
-	const handleClearChat = useCallback(async () => {
-		stopGeneration()
-		await clearConversation()
-	}, [clearConversation, stopGeneration])
-
-	const handleImportChat = useCallback(
-		async (imported: Parameters<typeof replaceConversation>[0]) => {
-			await replaceConversation(imported)
-		},
-		[replaceConversation],
-	)
 
 	return (
 		<div className="flex w-full shrink-0 border-b border-border/80 bg-background/95 backdrop-blur-md">
@@ -67,6 +52,7 @@ export function DualPaneHeader() {
 					<div className="min-w-0">
 						<h2 className="truncate text-sm font-semibold">{pane1Info.title}</h2>
 						<p className="truncate text-[10px] text-muted-foreground">
+							{pane1Route === '/chat' && conversation?.title ? `${conversation.title} · ` : ''}
 							{formatAppVersionLabel()}
 						</p>
 					</div>
@@ -76,12 +62,7 @@ export function DualPaneHeader() {
 					{pane1Route === '/chat' ? (
 						<>
 							{chatHeaderVoiceSlot}
-							<ChatConversationActions
-								conversation={conversation}
-								isGenerating={isGenerating}
-								onClear={handleClearChat}
-								onImport={handleImportChat}
-							/>
+							<ChatConversationActions />
 						</>
 					) : null}
 				</div>

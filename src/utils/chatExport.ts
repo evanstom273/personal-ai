@@ -1,5 +1,5 @@
 import { zipSync, unzipSync } from 'fflate'
-import { MAIN_CONVERSATION_ID } from '@/services/gemini/constants'
+import { MAIN_CONVERSATION_ID } from '@/services/claude/constants'
 import type { ConversationRecord, MessageMedia, StoredMessage } from '@/storage/types'
 import { buildDownloadFilename, downloadBlob, extensionForMimeType } from '@/utils/downloads'
 

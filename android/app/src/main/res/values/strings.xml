@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Gemini Chat</string>
-    <string name="title_activity_main">Gemini Chat</string>
+    <string name="app_name">Personal AI</string>
+    <string name="title_activity_main">Personal AI</string>
     <string name="package_name">com.personalai.geminichat</string>
     <string name="custom_url_scheme">com.personalai.geminichat</string>
 </resources>

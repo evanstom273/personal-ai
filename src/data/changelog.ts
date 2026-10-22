@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.1.5'
+export const APP_VERSION = '3.0.0'
 
 export interface ChangelogEntry {
 	version: string
@@ -8,6 +8,22 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+	{
+		version: '3.0.0',
+		releasedAt: '2026-10-22',
+		summary: 'Powered by Claude Haiku 5.5',
+		changes: [
+			'Chat, memory archiving, document AI, and the scratchpad now use Claude Haiku 5.5 through your own Anthropic API key. Gemini has been removed.',
+			'Image, music, and video generation and the model pickers are gone. Uploading images, PDFs, text, and code files for Claude to read still works — PDFs are now read natively, including scanned pages.',
+			'Web search and page reading use Anthropic\'s built-in tools, on by default, with numbered citations and a sources list under each reply. Toggle it from the + menu or Settings → API.',
+			'Multiple conversations: create, switch, rename, and delete chats, with optional per-conversation instructions. Your existing chat is kept as one of them; imports are added as new conversations.',
+			'Regenerate the latest reply; stopping a reply keeps what was written so far.',
+			'New Settings → Usage tab: estimated cost per reply, daily and monthly totals, and optional local spending limits with warnings.',
+			'Lower running costs: prompt caching, a leaner always-on context (older memories are searched on demand), capped web lookups, and image downscaling.',
+			'Voice input and read-aloud now use your device\'s built-in speech features instead of a paid API.',
+			'Existing conversations, documents, projects, reminders, and memories are kept. Old Gemini API keys and model settings are removed from storage.',
+		],
+	},
 	{
 		version: '2.1.5',
 		releasedAt: '2026-08-12',

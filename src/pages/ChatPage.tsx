@@ -1,89 +1,77 @@
-import type { GenerationIntent } from '@/services/gemini/constants'
 import {
 	useChatGenerationContext,
 	useChatHeaderSlot,
-	useMainConversationContext,
+	useConversationsContext,
 	usePreferencesContext,
 	useTextToSpeechContext,
 } from '@/providers/ChatProvider'
-import { confirmDocumentDeletion } from '@/services/gemini/documentTools'
-import { getTranscriptionModelId } from '@/services/gemini/modelPreferences'
-import { getConfiguredAiName } from '@/services/gemini/systemInstruction'
-import type { StoredMessage, UserPreferences } from '@/storage/types'
-import { getActiveGeminiApiKey, hasGeminiApiKey } from '@/storage/geminiApiKeys'
+import { confirmDocumentDeletion } from '@/services/claude/documentTools'
+import { CLAUDE_MODEL_NAME } from '@/services/claude/constants'
+import { getConfiguredAiName } from '@/services/claude/systemInstruction'
+import type { StoredMessage } from '@/storage/types'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChatConversationActions } from '@/components/chat/ChatConversationActions'
 import { ChatInput } from '@/components/chat/ChatInput'
 import { ChatMessages } from '@/components/chat/ChatMessages'
-import { ChatModelSelector } from '@/components/chat/ChatModelSelector'
 
 export function ChatPage() {
 	const { preferences, savePreferences } = usePreferencesContext()
-	const {
-		conversation,
-		appendMessages,
-		updateMessage,
-		clearConversation,
-		replaceConversation,
-	} = useMainConversationContext()
+	const { conversation, appendMessages, updateMessage } = useConversationsContext()
 	const {
 		isGenerating,
 		error,
-		lastIntent,
+		spendingWarning,
 		streamingAssistant,
 		submitMessage,
+		regenerateMessage,
 		stopGeneration,
 		clearCompletionNotice,
+		clearError,
+		clearSpendingWarning,
 	} = useChatGenerationContext()
 	const {
 		activeMessageId: activeSpeechMessageId,
 		status: speechStatus,
 		error: speechError,
+		isSupported: isSpeechOutputSupported,
 		speakAssistantMessage,
 		stop: stopSpeech,
 		clearError: clearSpeechError,
 	} = useTextToSpeechContext()
 	const { slot: voiceHeaderSlot } = useChatHeaderSlot()
 
-	const [webSearchEnabled, setWebSearchEnabled] = useState(false)
-	const [forcedNextIntent, setForcedNextIntent] =
-		useState<GenerationIntent | null>(null)
 	const [editingMessage, setEditingMessage] = useState<StoredMessage | null>(
 		null,
 	)
 
 	const aiName = getConfiguredAiName(preferences)
-	const hasApiKey = hasGeminiApiKey(preferences)
+	const hasApiKey = preferences.anthropicApiKey.trim().length > 0
+	const messages = conversation?.messages ?? []
+	const visibleStreamingAssistant =
+		streamingAssistant && streamingAssistant.conversationId === conversation?.id
+			? streamingAssistant
+			: null
+	const lastMessage = messages[messages.length - 1]
+	const regenerableMessageId =
+		lastMessage?.role === 'assistant' &&
+		messages[messages.length - 2]?.role === 'user'
+			? lastMessage.id
+			: null
 
 	useEffect(() => {
 		clearCompletionNotice()
 	}, [clearCompletionNotice])
 
-	const saveModelPreference = useCallback(
-		async (patch: Partial<UserPreferences>) => {
-			await savePreferences({
-				...preferences,
-				...patch,
-			})
+	useEffect(() => {
+		setEditingMessage(null)
+	}, [conversation?.id])
+
+	const handleWebSearchChange = useCallback(
+		async (enabled: boolean) => {
+			await savePreferences({ ...preferences, webSearchEnabled: enabled })
 		},
 		[preferences, savePreferences],
-	)
-
-	const handleClearChat = useCallback(async () => {
-		stopGeneration()
-		setEditingMessage(null)
-		await clearConversation()
-		setForcedNextIntent(null)
-	}, [clearConversation, stopGeneration])
-
-	const handleImportChat = useCallback(
-		async (imported: Parameters<typeof replaceConversation>[0]) => {
-			setEditingMessage(null)
-			await replaceConversation(imported)
-			setForcedNextIntent(null)
-		},
-		[replaceConversation],
 	)
 
 	const handleEditUserMessage = useCallback(
@@ -97,15 +85,18 @@ export function ChatPage() {
 	const handleSubmit = useCallback(
 		async (payload: Parameters<typeof submitMessage>[0]) => {
 			stopSpeech()
-			const activeForcedIntent = forcedNextIntent
-			if (activeForcedIntent) {
-				setForcedNextIntent(null)
-			}
-
-			await submitMessage(payload, { forcedNextIntent: activeForcedIntent })
+			await submitMessage(payload)
 			setEditingMessage(null)
 		},
-		[forcedNextIntent, stopSpeech, submitMessage],
+		[stopSpeech, submitMessage],
+	)
+
+	const handleRegenerate = useCallback(
+		(message: StoredMessage) => {
+			stopSpeech()
+			void regenerateMessage(message.id)
+		},
+		[regenerateMessage, stopSpeech],
 	)
 
 	const handleConfirmDelete = useCallback(
@@ -155,28 +146,16 @@ export function ChatPage() {
 	return (
 		<div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
 			<header className="hidden shrink-0 flex-wrap items-center justify-between gap-3 app-header-glass px-4 py-3 md:flex md:px-6">
-				<div>
+				<div className="min-w-0">
 					<div className="flex items-center gap-2">
 						<h1 className="text-lg font-semibold">{aiName}</h1>
 						{voiceHeaderSlot}
-						<ChatConversationActions
-							conversation={conversation}
-							isGenerating={isGenerating}
-							onClear={handleClearChat}
-							onImport={handleImportChat}
-						/>
+						<ChatConversationActions />
 					</div>
-					<p className="text-xs text-muted-foreground">
-						Try &quot;generate an image of…&quot; or &quot;generate music&quot;
-						{lastIntent ? ` · last: ${lastIntent}` : ''}
+					<p className="truncate text-xs text-muted-foreground">
+						{conversation?.title ?? 'Chat'} · {CLAUDE_MODEL_NAME}
 					</p>
 				</div>
-				<ChatModelSelector
-					value={preferences.defaultModelId}
-					onChange={(modelId) => {
-						void saveModelPreference({ defaultModelId: modelId })
-					}}
-				/>
 			</header>
 
 			{!hasApiKey ? (
@@ -185,17 +164,49 @@ export function ChatPage() {
 						No API key configured.{' '}
 					</span>
 					<Link
-						to="/settings"
+						to="/settings?tab=api"
 						className="font-medium text-primary underline-offset-4 hover:underline"
 					>
-						Add your Gemini API key
+						Add your Anthropic API key
 					</Link>
 				</div>
 			) : null}
 
 			{error ? (
 				<div className="shrink-0 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive md:px-6">
-					{error}
+					<div className="flex items-start justify-between gap-3">
+						<p>{error}</p>
+						<button
+							type="button"
+							className="shrink-0 text-xs underline-offset-4 hover:underline"
+							onClick={clearError}
+						>
+							Dismiss
+						</button>
+					</div>
+				</div>
+			) : null}
+
+			{spendingWarning && !error ? (
+				<div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-900 dark:text-amber-100 md:px-6">
+					<div className="flex items-start justify-between gap-3">
+						<p>
+							{spendingWarning}{' '}
+							<Link
+								to="/settings?tab=usage"
+								className="font-medium underline-offset-4 hover:underline"
+							>
+								View usage
+							</Link>
+						</p>
+						<button
+							type="button"
+							className="shrink-0 text-xs underline-offset-4 hover:underline"
+							onClick={clearSpendingWarning}
+						>
+							Dismiss
+						</button>
+					</div>
 				</div>
 			) : null}
 
@@ -215,41 +226,32 @@ export function ChatPage() {
 			) : null}
 
 			<ChatMessages
-				messages={conversation?.messages ?? []}
-				streamingAssistant={streamingAssistant}
-				isGenerating={isGenerating}
+				key={conversation?.id ?? 'chat'}
+				scrollConversationKey={conversation?.id}
+				messages={messages}
+				streamingAssistant={visibleStreamingAssistant}
+				isGenerating={isGenerating && Boolean(visibleStreamingAssistant)}
 				aiName={aiName}
+				webSearchEnabled={preferences.webSearchEnabled}
 				editingMessageId={editingMessage?.id ?? null}
 				onEditUserMessage={handleEditUserMessage}
+				regenerableMessageId={isGenerating ? null : regenerableMessageId}
+				onRegenerate={handleRegenerate}
 				onConfirmDelete={handleConfirmDelete}
 				onCancelDelete={handleCancelDelete}
 				activeSpeechMessageId={activeSpeechMessageId}
 				speechStatus={speechStatus}
-				onSpeakMessage={handleSpeakMessage}
+				onSpeakMessage={isSpeechOutputSupported ? handleSpeakMessage : undefined}
 				onStopSpeech={stopSpeech}
-				speechDisabled={!hasApiKey || isGenerating}
+				speechDisabled={isGenerating}
 			/>
 
 			<ChatInput
 				disabled={!hasApiKey}
 				isGenerating={isGenerating}
-				webSearchEnabled={webSearchEnabled}
-				geminiApiKey={getActiveGeminiApiKey(preferences)}
-				transcriptionModelId={getTranscriptionModelId(preferences.defaultModelId)}
-				selectedChatModelId={preferences.defaultModelId}
-				selectedImageModelId={preferences.defaultImageModelId}
-				selectedMusicModelId={preferences.defaultMusicModelId}
-				forcedNextIntent={forcedNextIntent}
-				onForceNextIntent={setForcedNextIntent}
-				onWebSearchChange={setWebSearchEnabled}
-				onChatModelChange={(modelId) => {
-					void saveModelPreference({ defaultModelId: modelId })
-				}}
-				onImageModelChange={(modelId) => {
-					void saveModelPreference({ defaultImageModelId: modelId })
-				}}
-				onMusicModelChange={(modelId) => {
-					void saveModelPreference({ defaultMusicModelId: modelId })
+				webSearchEnabled={preferences.webSearchEnabled}
+				onWebSearchChange={(enabled) => {
+					void handleWebSearchChange(enabled)
 				}}
 				editingMessage={editingMessage}
 				onCancelEdit={() => setEditingMessage(null)}

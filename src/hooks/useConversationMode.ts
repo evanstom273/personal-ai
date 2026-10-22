@@ -1,12 +1,10 @@
 import { useCallback, useRef, useState } from 'react'
-import { transcribeAudioWithGemini } from '@/services/gemini/transcribeAudio'
 import type { ChatSubmitPayload } from '@/types/chat'
 import {
 	getSpeechRecognitionConstructor,
 	getSpeechRecognitionProfile,
 	openMicrophoneStream,
 	releaseMicrophoneStream,
-	shouldUseRecorderTranscription,
 } from '@/utils/speechRecognition'
 
 export type ConversationModeStatus =
@@ -17,18 +15,13 @@ export type ConversationModeStatus =
 	| 'speaking'
 
 const SILENCE_MS = 5500
-const SPEECH_RMS_THRESHOLD = 0.018
 
 interface UseConversationModeOptions {
-	geminiApiKey: string
-	transcriptionModelId: string
 	onSubmit: (payload: ChatSubmitPayload) => Promise<void>
 	onStopSpeaking: () => void
 }
 
 export function useConversationMode({
-	geminiApiKey,
-	transcriptionModelId,
 	onSubmit,
 	onStopSpeaking,
 }: UseConversationModeOptions) {
@@ -38,14 +31,10 @@ export function useConversationMode({
 	const [liveTranscript, setLiveTranscript] = useState('')
 	const [error, setError] = useState<string | null>(null)
 
-	const useRecorder = shouldUseRecorderTranscription()
 	const recognitionRef = useRef<SpeechRecognition | null>(null)
 	const micStreamRef = useRef<MediaStream | null>(null)
-	const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-	const audioChunksRef = useRef<Blob[]>([])
 	const committedRef = useRef('')
 	const interimRef = useRef('')
-	const hasSpeechRef = useRef(false)
 	const lastSpeechAtRef = useRef(0)
 	const silenceTimerRef = useRef<number | null>(null)
 	const isActiveRef = useRef(false)
@@ -82,38 +71,6 @@ export function useConversationMode({
 		}
 	}, [])
 
-	const stopRecorder = useCallback(async (): Promise<Blob | null> => {
-		const recorder = mediaRecorderRef.current
-		mediaRecorderRef.current = null
-
-		if (!recorder || recorder.state === 'inactive') {
-			const chunks = audioChunksRef.current
-			audioChunksRef.current = []
-			return chunks.length > 0
-				? new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
-				: null
-		}
-
-		return new Promise((resolve) => {
-			recorder.onstop = () => {
-				const chunks = audioChunksRef.current
-				audioChunksRef.current = []
-				resolve(
-					chunks.length > 0
-						? new Blob(chunks, {
-								type: chunks[0]?.type || recorder.mimeType || 'audio/webm',
-							})
-						: null,
-				)
-			}
-			try {
-				recorder.stop()
-			} catch {
-				resolve(null)
-			}
-		})
-	}, [])
-
 	const submitTranscript = useCallback(async () => {
 		if (!isActiveRef.current || isMutedRef.current) {
 			return
@@ -123,33 +80,8 @@ export function useConversationMode({
 		stopRecognition()
 		setConversationStatus('transcribing')
 
-		let transcript = `${committedRef.current} ${interimRef.current}`.trim()
-
-		if (useRecorder) {
-			const audioBlob = await stopRecorder()
-			releaseMicrophone()
-			if (audioBlob) {
-				try {
-					const spoken = await transcribeAudioWithGemini(
-						geminiApiKey,
-						transcriptionModelId,
-						audioBlob,
-					)
-					transcript = `${transcript} ${spoken}`.trim()
-				} catch (transcriptionError) {
-					setError(
-						transcriptionError instanceof Error
-							? transcriptionError.message
-							: 'Transcription failed.',
-					)
-					setConversationStatus('listening')
-					void beginListeningRef.current()
-					return
-				}
-			}
-		} else {
-			releaseMicrophone()
-		}
+		const transcript = `${committedRef.current} ${interimRef.current}`.trim()
+		releaseMicrophone()
 
 		committedRef.current = ''
 		interimRef.current = ''
@@ -165,19 +97,14 @@ export function useConversationMode({
 		await onSubmit({
 			text: transcript,
 			attachments: [],
-			webSearchEnabled: false,
 			inputMethod: 'speech',
 		})
 	}, [
 		clearSilenceTimer,
-		geminiApiKey,
 		onSubmit,
 		releaseMicrophone,
 		stopRecognition,
-		stopRecorder,
 		setConversationStatus,
-		transcriptionModelId,
-		useRecorder,
 	])
 
 	const scheduleSilenceSubmit = useCallback(() => {
@@ -199,78 +126,6 @@ export function useConversationMode({
 
 	const beginListening = useCallback(async () => {
 		if (!isActiveRef.current || isMutedRef.current) {
-			return
-		}
-
-		if (useRecorder) {
-			const microphone = await openMicrophoneStream()
-			if (!microphone.ok) {
-				setError(microphone.message)
-				return
-			}
-
-			releaseMicrophone()
-			micStreamRef.current = microphone.stream
-			audioChunksRef.current = []
-
-			const audioContext = new AudioContext()
-			await audioContext.resume()
-			const source = audioContext.createMediaStreamSource(microphone.stream)
-			const analyser = audioContext.createAnalyser()
-			analyser.fftSize = 2048
-			source.connect(analyser)
-
-			let recorder: MediaRecorder
-			try {
-				recorder = new MediaRecorder(microphone.stream)
-			} catch {
-				releaseMicrophone()
-				setError('Could not start audio recording on this device.')
-				return
-			}
-
-			recorder.ondataavailable = (event) => {
-				if (event.data.size > 0) {
-					audioChunksRef.current.push(event.data)
-				}
-			}
-			mediaRecorderRef.current = recorder
-			committedRef.current = ''
-			interimRef.current = ''
-			hasSpeechRef.current = false
-			setLiveTranscript('')
-			setError(null)
-			setConversationStatus('listening')
-			lastSpeechAtRef.current = Date.now()
-			recorder.start(250)
-
-			const data = new Uint8Array(analyser.fftSize)
-			const pollSilence = () => {
-				if (!isActiveRef.current || statusRef.current !== 'listening') {
-					void audioContext.close()
-					return
-				}
-				analyser.getByteTimeDomainData(data)
-				let sum = 0
-				for (let index = 0; index < data.length; index += 1) {
-					const value = (data[index]! - 128) / 128
-					sum += value * value
-				}
-				const rms = Math.sqrt(sum / data.length)
-				if (rms > SPEECH_RMS_THRESHOLD) {
-					hasSpeechRef.current = true
-					lastSpeechAtRef.current = Date.now()
-				} else if (
-					hasSpeechRef.current &&
-					Date.now() - lastSpeechAtRef.current > SILENCE_MS
-				) {
-					void audioContext.close()
-					void submitTranscript()
-					return
-				}
-				window.setTimeout(pollSilence, 200)
-			}
-			pollSilence()
 			return
 		}
 
@@ -333,8 +188,6 @@ export function useConversationMode({
 		scheduleSilenceSubmit,
 		stopRecognition,
 		setConversationStatus,
-		submitTranscript,
-		useRecorder,
 	])
 
 	beginListeningRef.current = beginListening
@@ -355,21 +208,18 @@ export function useConversationMode({
 		setIsActive(false)
 		clearSilenceTimer()
 		stopRecognition()
-		await stopRecorder()
 		releaseMicrophone()
 		onStopSpeaking()
 		setConversationStatus('idle')
 		setLiveTranscript('')
 		committedRef.current = ''
 		interimRef.current = ''
-		hasSpeechRef.current = false
 	}, [
 		clearSilenceTimer,
 		onStopSpeaking,
 		releaseMicrophone,
 		setConversationStatus,
 		stopRecognition,
-		stopRecorder,
 	])
 
 	const resumeListening = useCallback(async () => {
@@ -404,14 +254,13 @@ export function useConversationMode({
 			if (next) {
 				clearSilenceTimer()
 				stopRecognition()
-				void stopRecorder()
 				releaseMicrophone()
 			} else if (isActiveRef.current) {
 				void beginListening()
 			}
 			return next
 		})
-	}, [beginListening, clearSilenceTimer, releaseMicrophone, stopRecognition, stopRecorder])
+	}, [beginListening, clearSilenceTimer, releaseMicrophone, stopRecognition])
 
 	return {
 		isActive,

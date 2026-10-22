@@ -1,6 +1,6 @@
 import type { DocumentRecord } from '@/storage/types'
 import { formatChangelogMarkdown } from '@/data/changelog'
-import { getAppReferenceMarkdown } from '@/services/gemini/appReferenceContext'
+import { getAppReferenceMarkdown } from '@/services/claude/appReferenceContext'
 import {
 	documentContentForExport,
 	htmlToPlainTextMultiline,

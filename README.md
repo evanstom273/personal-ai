@@ -1,13 +1,14 @@
-# Gemini Chat Dashboard
+# Personal AI
 
-A bring-your-own-key Gemini chat dashboard with local persistence and PWA support.
+A bring-your-own-key personal assistant powered by **Claude Haiku 5.5**, with local persistence and PWA support.
 
 ## Stack
 
 - React + Vite + TypeScript
 - Tailwind CSS
-- IndexedDB for API keys and conversations
-- PWA (installable, offline shell via service worker)
+- Anthropic TypeScript SDK (`@anthropic-ai/sdk`), called directly from the browser
+- IndexedDB for the API key, conversations, documents, reminders, memory, and usage
+- PWA (installable, offline shell via service worker) and an optional Capacitor Android build
 
 ## Getting started
 
@@ -21,19 +22,17 @@ Open `http://localhost:5173`.
 
 ## Usage
 
-1. Open **Settings** and paste your [Gemini API key](https://aistudio.google.com/apikey).
-2. Choose a model from the header dropdown.
-3. Start chatting or generating.
+1. Create an API key in the [Claude Console](https://platform.claude.com/settings/keys).
+2. Open **Settings → API**, paste the key, and tap **Save key** (optionally **Test key**).
+3. Start chatting. Web search is on by default; toggle it from the **+** menu or Settings → API.
 
-Your API key is stored locally in IndexedDB and sent directly from your browser to Google's Gemini API.
+The key is stored locally in IndexedDB and sent directly from your browser to `api.anthropic.com` — there is no backend. Treat the device as trusted, and consider a dedicated workspace key with a spend limit set in the Console.
 
-## Models
+## Model and costs
 
-| Category | Models |
-|----------|--------|
-| Chat | Gemini 3.6 Flash, Gemini 3.1 Pro |
-| Image | Nano Banana Pro, Nano Banana 2, Nano Banana 2 Lite |
-| Music | Lyria 3 Pro, Lyria 3 Clip |
+Every request uses `claude-haiku-5-5` ($0.10 / $0.50 per million input / output tokens for prompts up to 100K tokens; cache reads $0.01). Web search costs $10 per 1,000 searches; web fetch costs tokens only.
+
+The app keeps costs down with prompt caching, a bounded chat history (older messages are archived into memory), capped web lookups, and on-device image downscaling. **Settings → Usage** shows estimated cost per reply, daily and monthly totals, and lets you set local spending limits. Those limits only apply inside this app; set a hard limit on the Console's billing page as well.
 
 ## Build
 
@@ -70,9 +69,9 @@ The web/PWA build for GitHub Pages still uses `VITE_BASE_PATH=/personal-ai/` via
 src/
   components/     Chat UI and shared components
   hooks/          Conversation and preference hooks
-  layout/         App shell and sidebar
-  pages/          Chat and settings pages
+  layout/         App shell and navigation
+  pages/          Route pages
   providers/      Shared React context
-  services/       Gemini API client and model registry
+  services/       Claude API client, chat loop, tools, usage tracking
   storage/        IndexedDB layer
 ```

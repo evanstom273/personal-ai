@@ -20,38 +20,9 @@ export function isAndroidDevice(): boolean {
 	return /Android/i.test(navigator.userAgent)
 }
 
-export function isStandalonePwa(): boolean {
-	if (typeof window === 'undefined') {
-		return false
-	}
-
-	return (
-		window.matchMedia('(display-mode: standalone)').matches ||
-		(window.navigator as Navigator & { standalone?: boolean }).standalone ===
-			true
-	)
-}
-
-export function isRecorderTranscriptionSupported(): boolean {
-	if (typeof window === 'undefined') {
-		return false
-	}
-
-	return (
-		typeof MediaRecorder !== 'undefined' &&
-		typeof navigator.mediaDevices?.getUserMedia === 'function'
-	)
-}
-
-export function shouldUseRecorderTranscription(): boolean {
-	return (
-		isRecorderTranscriptionSupported() &&
-		(isAndroidDevice() || isStandalonePwa())
-	)
-}
-
+/** Voice input uses the browser's speech recognition; it is unavailable in some WebViews. */
 export function isVoiceInputSupported(): boolean {
-	return shouldUseRecorderTranscription() || isSpeechRecognitionSupported()
+	return isSpeechRecognitionSupported()
 }
 
 export interface SpeechRecognitionProfile {
@@ -154,9 +125,5 @@ export function getSpeechRecognitionErrorMessage(error: string): string {
 }
 
 export function getAndroidSpeechHelpMessage(): string {
-	return 'Voice input on Android uses your Gemini API key to transcribe a short recording. If it still fails, open the site in Chrome instead of the home-screen app.'
-}
-
-export function getRecorderSpeechHint(): string {
-	return 'Recording… speak now, then tap Continue to transcribe.'
+	return 'Voice input uses your device\'s speech recognition. If it keeps failing, check the microphone permission, or open the site in Chrome instead of the home-screen app.'
 }

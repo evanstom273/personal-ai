@@ -1,6 +1,6 @@
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
-import { Check, ChevronDown } from 'lucide-react'
-import type { ComponentProps, ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
+import type { ComponentProps } from 'react'
 import { cn } from '@/utils/cn'
 
 export function DropdownMenu(
@@ -78,52 +78,6 @@ export function DropdownMenuItem({
 	)
 }
 
-interface ModelMenuItemProps {
-	label: string
-	description: string
-	selected?: boolean
-	onSelect: () => void
-	className?: string
-}
-
-export function ModelMenuItem({
-	label,
-	description,
-	selected,
-	onSelect,
-	className,
-}: ModelMenuItemProps) {
-	return (
-		<DropdownMenuItem
-			onSelect={onSelect}
-			className={cn('flex-col items-start gap-0.5', className)}
-		>
-			<div className="flex w-full items-center justify-between gap-2">
-				<span className="font-medium">{label}</span>
-				{selected ? <Check className="h-4 w-4 text-primary" /> : null}
-			</div>
-			<span className="text-xs text-muted-foreground">{description}</span>
-		</DropdownMenuItem>
-	)
-}
-
 export function DropdownMenuSeparator() {
 	return <DropdownMenuPrimitive.Separator className="my-1 h-px bg-border" />
-}
-
-export function DropdownMenuTriggerContent({
-	label,
-	subtitle,
-}: {
-	label: ReactNode
-	subtitle?: ReactNode
-}) {
-	return (
-		<div className="flex flex-col items-start text-left">
-			<span className="font-medium">{label}</span>
-			{subtitle ? (
-				<span className="text-xs text-muted-foreground">{subtitle}</span>
-			) : null}
-		</div>
-	)
 }

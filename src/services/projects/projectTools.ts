@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import {
 	createProject,
 	createTask,
@@ -23,11 +24,11 @@ export const PROJECT_TOOL_DECLARATIONS = [
 		name: 'list_projects',
 		description:
 			'List kanban projects stored in the app. Each project has todo, doing, and done columns.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				query: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional case-insensitive title search filter.',
 				},
 			},
@@ -36,11 +37,11 @@ export const PROJECT_TOOL_DECLARATIONS = [
 	{
 		name: 'get_project',
 		description: 'Get a project with all tasks by id or title.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				title: { type: 'STRING' },
+				project_id: { type: 'string' },
+				title: { type: 'string' },
 			},
 		},
 	},
@@ -48,34 +49,34 @@ export const PROJECT_TOOL_DECLARATIONS = [
 		name: 'create_project',
 		description:
 			'Create a new kanban project. Optionally include initial tasks and linked document ids.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				title: { type: 'STRING' },
-				description: { type: 'STRING' },
+				title: { type: 'string' },
+				description: { type: 'string' },
 				document_ids: {
-					type: 'ARRAY',
-					items: { type: 'STRING' },
+					type: 'array',
+					items: { type: 'string' },
 					description: 'Optional linked document ids from the document library.',
 				},
 				tasks: {
-					type: 'ARRAY',
+					type: 'array',
 					items: {
-						type: 'OBJECT',
+						type: 'object',
 						properties: {
-							title: { type: 'STRING' },
-							note: { type: 'STRING' },
+							title: { type: 'string' },
+							note: { type: 'string' },
 							status: {
-								type: 'STRING',
+								type: 'string',
 								description: 'One of: todo, doing, done.',
 							},
 							checklist: {
-								type: 'ARRAY',
-								items: { type: 'STRING' },
+								type: 'array',
+								items: { type: 'string' },
 							},
 							document_ids: {
-								type: 'ARRAY',
-								items: { type: 'STRING' },
+								type: 'array',
+								items: { type: 'string' },
 							},
 						},
 					},
@@ -87,16 +88,16 @@ export const PROJECT_TOOL_DECLARATIONS = [
 	{
 		name: 'update_project',
 		description: 'Update a project title, description, or linked documents.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				title: { type: 'STRING', description: 'Current title if id is unknown.' },
-				new_title: { type: 'STRING' },
-				description: { type: 'STRING' },
+				project_id: { type: 'string' },
+				title: { type: 'string', description: 'Current title if id is unknown.' },
+				new_title: { type: 'string' },
+				description: { type: 'string' },
 				document_ids: {
-					type: 'ARRAY',
-					items: { type: 'STRING' },
+					type: 'array',
+					items: { type: 'string' },
 				},
 			},
 		},
@@ -104,35 +105,35 @@ export const PROJECT_TOOL_DECLARATIONS = [
 	{
 		name: 'delete_project',
 		description: 'Delete a project and all of its tasks.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				title: { type: 'STRING' },
+				project_id: { type: 'string' },
+				title: { type: 'string' },
 			},
 		},
 	},
 	{
 		name: 'create_task',
 		description: 'Add a task card to a project column.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				project_title: { type: 'STRING' },
-				title: { type: 'STRING' },
-				note: { type: 'STRING' },
-				status: { type: 'STRING', description: 'One of: todo, doing, done.' },
+				project_id: { type: 'string' },
+				project_title: { type: 'string' },
+				title: { type: 'string' },
+				note: { type: 'string' },
+				status: { type: 'string', description: 'One of: todo, doing, done.' },
 				checklist: {
-					type: 'ARRAY',
-					items: { type: 'STRING' },
+					type: 'array',
+					items: { type: 'string' },
 				},
 				document_ids: {
-					type: 'ARRAY',
-					items: { type: 'STRING' },
+					type: 'array',
+					items: { type: 'string' },
 				},
 				reminder_id: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional reminder id to link to this task.',
 				},
 			},
@@ -142,45 +143,45 @@ export const PROJECT_TOOL_DECLARATIONS = [
 	{
 		name: 'update_task',
 		description: 'Update a task card, checklist, links, or reminder.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				project_title: { type: 'STRING' },
-				task_id: { type: 'STRING' },
-				task_title: { type: 'STRING' },
-				new_title: { type: 'STRING' },
-				note: { type: 'STRING' },
-				status: { type: 'STRING' },
+				project_id: { type: 'string' },
+				project_title: { type: 'string' },
+				task_id: { type: 'string' },
+				task_title: { type: 'string' },
+				new_title: { type: 'string' },
+				note: { type: 'string' },
+				status: { type: 'string' },
 				checklist: {
-					type: 'ARRAY',
+					type: 'array',
 					items: {
-						type: 'OBJECT',
+						type: 'object',
 						properties: {
-							label: { type: 'STRING' },
-							checked: { type: 'BOOLEAN' },
+							label: { type: 'string' },
+							checked: { type: 'boolean' },
 						},
 					},
 				},
 				document_ids: {
-					type: 'ARRAY',
-					items: { type: 'STRING' },
+					type: 'array',
+					items: { type: 'string' },
 				},
-				reminder_id: { type: 'STRING' },
+				reminder_id: { type: 'string' },
 			},
 		},
 	},
 	{
 		name: 'move_task',
 		description: 'Move a task between todo, doing, and done columns.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				project_title: { type: 'STRING' },
-				task_id: { type: 'STRING' },
-				task_title: { type: 'STRING' },
-				status: { type: 'STRING', description: 'One of: todo, doing, done.' },
+				project_id: { type: 'string' },
+				project_title: { type: 'string' },
+				task_id: { type: 'string' },
+				task_title: { type: 'string' },
+				status: { type: 'string', description: 'One of: todo, doing, done.' },
 			},
 			required: ['status'],
 		},
@@ -188,17 +189,17 @@ export const PROJECT_TOOL_DECLARATIONS = [
 	{
 		name: 'delete_task',
 		description: 'Delete a task from a project.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				project_id: { type: 'STRING' },
-				project_title: { type: 'STRING' },
-				task_id: { type: 'STRING' },
-				task_title: { type: 'STRING' },
+				project_id: { type: 'string' },
+				project_title: { type: 'string' },
+				task_id: { type: 'string' },
+				task_title: { type: 'string' },
 			},
 		},
 	},
-] as const
+] satisfies Anthropic.Tool[]
 
 function serializeProject(project: Awaited<ReturnType<typeof listProjects>>[number]) {
 	return {

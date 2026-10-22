@@ -17,22 +17,39 @@ export function ChatMarkdown({ content, className }: ChatMarkdownProps) {
 				remarkPlugins={[remarkGfm]}
 				components={{
 					pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-					a: ({ href, children }) => (
-						<a
-							href={href}
-							target="_blank"
-							rel="noopener noreferrer"
-							className="text-primary underline underline-offset-4"
-						>
-							{children}
-						</a>
-					),
+					a: ({ href, children }) =>
+						isCitationMarker(children) ? (
+							<a
+								href={href}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="chat-citation ml-0.5 align-super text-[0.7em] font-medium text-primary no-underline hover:underline"
+								title={href}
+							>
+								{children}
+							</a>
+						) : (
+							<a
+								href={href}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-primary underline underline-offset-4"
+							>
+								{children}
+							</a>
+						),
 				}}
 			>
 				{content}
 			</ReactMarkdown>
 		</div>
 	)
+}
+
+/** Web citations are rendered as small numbered links like [1]. */
+function isCitationMarker(children: ReactNode): boolean {
+	const text = extractTextFromNode(children)
+	return /^\[\d+\]$/.test(text)
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {

@@ -1,15 +1,14 @@
 import { ConversationModeOverlay } from '@/components/chat/ConversationModeOverlay'
 import { VoiceModeControls } from '@/components/chat/VoiceModeControls'
 import { useConversationMode } from '@/hooks/useConversationMode'
-import { getTranscriptionModelId } from '@/services/gemini/modelPreferences'
+import { isSpeechSynthesisSupported } from '@/hooks/useTextToSpeech'
 import { useChatHeaderSlot, useVoiceSessionContext } from '@/providers/ChatProvider'
-import type { StoredMessage, UserPreferences } from '@/storage/types'
-import { getActiveGeminiApiKey } from '@/storage/geminiApiKeys'
+import type { StoredMessage } from '@/storage/types'
 import type { ChatSubmitPayload } from '@/types/chat'
-import { useCallback, useEffect, useRef } from 'react'
+import { isVoiceInputSupported } from '@/utils/speechRecognition'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface ChatVoiceSessionProps {
-	preferences: UserPreferences
 	conversationMessages: StoredMessage[]
 	isGenerating: boolean
 	hasApiKey: boolean
@@ -27,7 +26,6 @@ interface ChatVoiceSessionProps {
 }
 
 export function ChatVoiceSession({
-	preferences,
 	conversationMessages,
 	isGenerating,
 	hasApiKey,
@@ -52,13 +50,19 @@ export function ChatVoiceSession({
 	)
 
 	const conversationMode = useConversationMode({
-		geminiApiKey: getActiveGeminiApiKey(preferences),
-		transcriptionModelId: getTranscriptionModelId(preferences.defaultModelId),
 		onSubmit: handleConversationSubmit,
 		onStopSpeaking: onStopSpeech,
 	})
+	// Hands-free mode needs both browser speech recognition and speech synthesis.
+	const [isVoiceModeAvailable] = useState(
+		() => isVoiceInputSupported() && isSpeechSynthesisSupported(),
+	)
 
 	useEffect(() => {
+		if (!isVoiceModeAvailable) {
+			setSlot(null)
+			return
+		}
 		setSlot(
 			<VoiceModeControls
 				hasApiKey={hasApiKey}
@@ -69,6 +73,7 @@ export function ChatVoiceSession({
 		)
 		return () => setSlot(null)
 	}, [
+		isVoiceModeAvailable,
 		setSlot,
 		hasApiKey,
 		conversationMode.isActive,

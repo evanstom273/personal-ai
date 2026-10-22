@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import {
 	addHomeTodo,
 	clearCompletedHomeTodos,
@@ -17,11 +18,11 @@ export const HOME_TODO_TOOL_DECLARATIONS = [
 		name: 'list_home_todos',
 		description:
 			'List items on the user Home dashboard todo list (separate from project kanban tasks).',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				include_checked: {
-					type: 'BOOLEAN',
+					type: 'boolean',
 					description: 'When false, only return unchecked todos. Defaults to true.',
 				},
 			},
@@ -30,10 +31,10 @@ export const HOME_TODO_TOOL_DECLARATIONS = [
 	{
 		name: 'add_home_todo',
 		description: 'Add a single item to the Home dashboard todo list.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				text: { type: 'STRING', description: 'Todo item text.' },
+				text: { type: 'string', description: 'Todo item text.' },
 			},
 			required: ['text'],
 		},
@@ -42,24 +43,24 @@ export const HOME_TODO_TOOL_DECLARATIONS = [
 		name: 'update_home_todo',
 		description:
 			'Update a Home todo by id or by matching text. Can change text or checked state.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				todo_id: { type: 'STRING' },
-				text: { type: 'STRING', description: 'Current text if id is unknown.' },
-				new_text: { type: 'STRING' },
-				checked: { type: 'BOOLEAN' },
+				todo_id: { type: 'string' },
+				text: { type: 'string', description: 'Current text if id is unknown.' },
+				new_text: { type: 'string' },
+				checked: { type: 'boolean' },
 			},
 		},
 	},
 	{
 		name: 'remove_home_todo',
 		description: 'Remove a Home todo by id or matching text.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				todo_id: { type: 'STRING' },
-				text: { type: 'STRING', description: 'Current text if id is unknown.' },
+				todo_id: { type: 'string' },
+				text: { type: 'string', description: 'Current text if id is unknown.' },
 			},
 		},
 	},
@@ -67,17 +68,17 @@ export const HOME_TODO_TOOL_DECLARATIONS = [
 		name: 'set_home_todos',
 		description:
 			'Replace the entire Home todo list with a new ordered list. Use when the user wants a fresh daily list.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				items: {
-					type: 'ARRAY',
+					type: 'array',
 					description: 'Ordered todo items.',
 					items: {
-						type: 'OBJECT',
+						type: 'object',
 						properties: {
-							text: { type: 'STRING' },
-							checked: { type: 'BOOLEAN' },
+							text: { type: 'string' },
+							checked: { type: 'boolean' },
 						},
 						required: ['text'],
 					},
@@ -89,12 +90,12 @@ export const HOME_TODO_TOOL_DECLARATIONS = [
 	{
 		name: 'clear_completed_home_todos',
 		description: 'Remove checked items from the Home todo list.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {},
 		},
 	},
-] as const
+] satisfies Anthropic.Tool[]
 
 const HOME_TODO_TOOL_NAMES = new Set<string>(
 	HOME_TODO_TOOL_DECLARATIONS.map((declaration) => declaration.name),

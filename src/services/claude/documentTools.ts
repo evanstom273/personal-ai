@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import {
 	createDocument,
 	deleteDocument,
@@ -13,7 +14,7 @@ import {
 	htmlToPlainText,
 	normalizeMarkdownContent,
 } from '@/utils/documentContent'
-import { truncateDocumentTextForTool } from '@/services/gemini/documentContext'
+import { truncateDocumentTextForTool } from '@/services/claude/documentContext'
 
 export interface DocumentToolResult {
 	name: string
@@ -29,11 +30,11 @@ export const DOCUMENT_TOOL_DECLARATIONS = [
 		name: 'list_documents',
 		description:
 			'List documents in the shared library, optionally filtered by title search query.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				query: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional case-insensitive title search filter.',
 				},
 			},
@@ -43,15 +44,15 @@ export const DOCUMENT_TOOL_DECLARATIONS = [
 		name: 'read_document',
 		description:
 			'Read the current content of a document by ID or exact title.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				document_id: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Stable document ID if known.',
 				},
 				title: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Exact document title if ID is unknown.',
 				},
 			},
@@ -60,12 +61,12 @@ export const DOCUMENT_TOOL_DECLARATIONS = [
 	{
 		name: 'create_document',
 		description: 'Create a new document in the shared library.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				title: { type: 'STRING', description: 'Document title.' },
+				title: { type: 'string', description: 'Document title.' },
 				content: {
-					type: 'STRING',
+					type: 'string',
 					description:
 						'Document body in Markdown (headings, lists, bold, links, code blocks).',
 				},
@@ -77,17 +78,17 @@ export const DOCUMENT_TOOL_DECLARATIONS = [
 		name: 'update_document',
 		description:
 			'Update an existing document. Read it first when unsure of current content.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				document_id: { type: 'STRING' },
-				title: { type: 'STRING', description: 'Exact title if ID is unknown.' },
+				document_id: { type: 'string' },
+				title: { type: 'string', description: 'Exact title if ID is unknown.' },
 				content: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Replacement document body in Markdown.',
 				},
 				new_title: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional new title while updating content.',
 				},
 			},
@@ -96,12 +97,12 @@ export const DOCUMENT_TOOL_DECLARATIONS = [
 	{
 		name: 'rename_document',
 		description: 'Rename an existing document.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				document_id: { type: 'STRING' },
-				title: { type: 'STRING', description: 'Current title if ID is unknown.' },
-				new_title: { type: 'STRING', description: 'New document title.' },
+				document_id: { type: 'string' },
+				title: { type: 'string', description: 'Current title if ID is unknown.' },
+				new_title: { type: 'string', description: 'New document title.' },
 			},
 			required: ['new_title'],
 		},
@@ -110,15 +111,15 @@ export const DOCUMENT_TOOL_DECLARATIONS = [
 		name: 'delete_document',
 		description:
 			'Request deletion of a document. Requires user confirmation in the app before it is permanently removed.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				document_id: { type: 'STRING' },
-				title: { type: 'STRING', description: 'Exact title if ID is unknown.' },
+				document_id: { type: 'string' },
+				title: { type: 'string', description: 'Exact title if ID is unknown.' },
 			},
 		},
 	},
-] as const
+] satisfies Anthropic.Tool[]
 
 export async function executeDocumentToolCall(
 	name: string,

@@ -1,6 +1,6 @@
 export type LibrarySection = 'schedule' | 'projects' | 'documents'
-export type LibraryDocumentTab = 'documents' | 'images' | 'music'
-export type SettingsTab = 'profile' | 'memory' | 'api' | 'voice' | 'app'
+export type LibraryDocumentTab = 'documents' | 'images'
+export type SettingsTab = 'profile' | 'memory' | 'api' | 'usage' | 'voice' | 'app'
 
 export type SwipeNavStep =
 	| { kind: 'route'; path: '/home' | '/chat' }
@@ -14,10 +14,10 @@ export const SWIPE_NAV_STEPS: SwipeNavStep[] = [
 	{ kind: 'library', section: 'projects' },
 	{ kind: 'library', section: 'documents', tab: 'documents' },
 	{ kind: 'library', section: 'documents', tab: 'images' },
-	{ kind: 'library', section: 'documents', tab: 'music' },
 	{ kind: 'settings', tab: 'profile' },
 	{ kind: 'settings', tab: 'memory' },
 	{ kind: 'settings', tab: 'api' },
+	{ kind: 'settings', tab: 'usage' },
 	{ kind: 'settings', tab: 'voice' },
 	{ kind: 'settings', tab: 'app' },
 ]
@@ -27,7 +27,7 @@ function isLibrarySection(value: string | null): value is LibrarySection {
 }
 
 function isLibraryDocumentTab(value: string | null): value is LibraryDocumentTab {
-	return value === 'documents' || value === 'images' || value === 'music'
+	return value === 'documents' || value === 'images'
 }
 
 function isSettingsTab(value: string | null): value is SettingsTab {
@@ -35,6 +35,7 @@ function isSettingsTab(value: string | null): value is SettingsTab {
 		value === 'profile' ||
 		value === 'memory' ||
 		value === 'api' ||
+		value === 'usage' ||
 		value === 'voice' ||
 		value === 'app'
 	)
@@ -76,14 +77,8 @@ export function resolveSwipeNavIndex(
 			return 3
 		}
 
-		if (isLibraryDocumentTab(tabParam)) {
-			if (tabParam === 'images') {
-				return 5
-			}
-
-			if (tabParam === 'music') {
-				return 6
-			}
+		if (tabParam === 'images') {
+			return 5
 		}
 
 		return 4
@@ -92,10 +87,14 @@ export function resolveSwipeNavIndex(
 	if (pathname === '/settings') {
 		const tabParam = searchParams.get('tab')
 		if (tabParam === 'memory') {
-			return 8
+			return 7
 		}
 
 		if (tabParam === 'api') {
+			return 8
+		}
+
+		if (tabParam === 'usage') {
 			return 9
 		}
 
@@ -107,7 +106,7 @@ export function resolveSwipeNavIndex(
 			return 11
 		}
 
-		return 7
+		return 6
 	}
 
 	return -1

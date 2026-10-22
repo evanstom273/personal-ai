@@ -4,10 +4,9 @@ import {
 	extractDocumentContextSlices,
 	generateDocumentWritingSuggestion,
 	type DocumentWritingAction,
-} from '@/services/gemini/documentWriting'
-import { getEconomyModelId } from '@/services/gemini/modelPreferences'
+} from '@/services/claude/documentWriting'
+import { describeClaudeError } from '@/services/claude/client'
 import type { UserPreferences } from '@/storage/types'
-import { getActiveGeminiApiKey, hasGeminiApiKey } from '@/storage/geminiApiKeys'
 import { markdownToHtml } from '@/utils/documentContent'
 
 const ACTION_LABELS: Record<DocumentWritingAction, string> = {
@@ -50,9 +49,9 @@ export function useDocumentAiWriting({
 				return
 			}
 
-			const apiKey = getActiveGeminiApiKey(preferences)
+			const apiKey = preferences.anthropicApiKey.trim()
 			if (!apiKey) {
-				setError('Add a Gemini API key in Settings to use AI writing assistance.')
+				setError('Add your Anthropic API key in Settings to use AI writing assistance.')
 				setIsGenerating(false)
 				return
 			}
@@ -74,7 +73,6 @@ export function useDocumentAiWriting({
 			try {
 				const suggestion = await generateDocumentWritingSuggestion({
 					apiKey,
-					modelId: getEconomyModelId(preferences.defaultModelId),
 					preferences,
 					documentTitle,
 					selectedText,
@@ -90,7 +88,7 @@ export function useDocumentAiWriting({
 				setPreviewText('')
 				setError(
 					generationError instanceof Error
-						? generationError.message
+						? describeClaudeError(generationError)
 						: 'AI generation failed. Your document was not changed.',
 				)
 			} finally {
@@ -211,7 +209,7 @@ export function useDocumentAiWriting({
 		setAskOpen(true)
 	}, [editor])
 
-	const hasApiKey = hasGeminiApiKey(preferences)
+	const hasApiKey = preferences.anthropicApiKey.trim().length > 0
 
 	return {
 		previewOpen,

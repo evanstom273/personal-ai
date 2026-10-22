@@ -1,4 +1,4 @@
-import { ArrowUp, Mic, Square, X } from 'lucide-react'
+import { ArrowUp, FileText, Mic, Square, X } from 'lucide-react'
 import {
 	useCallback,
 	useEffect,
@@ -21,14 +21,22 @@ import {
 	ingestUploadedDocumentContent,
 } from '@/utils/documentContent'
 import type { ChatAttachment, ChatInputMethod, ChatSubmitPayload } from '@/types/chat'
-import type { GenerationIntent } from '@/services/gemini/constants'
-import type { StoredMessage } from '@/storage/types'
-import { MODEL_CATEGORY_LABELS } from '@/services/gemini/models'
 import {
+	MAX_PDF_ATTACHMENT_BYTES,
+	MAX_PDF_ATTACHMENT_PAGES,
+	MAX_TEXT_ATTACHMENT_CHARS,
+} from '@/services/claude/constants'
+import type { MessageFileAttachment, StoredMessage } from '@/storage/types'
+import {
+	getCodeFenceLanguage,
 	getFileBaseName,
+	isCodeFile,
 	isImageFile,
+	isPdfFile,
 	isUploadableDocumentFile,
-	readFileAsDataUrl,
+	prepareImageForClaude,
+	readFileAsBase64,
+	readTextFile,
 	readUploadableDocumentContent,
 } from '@/utils/fileAttachments'
 import { cn } from '@/utils/cn'
@@ -37,17 +45,7 @@ interface ChatInputProps {
 	disabled?: boolean
 	isGenerating?: boolean
 	webSearchEnabled: boolean
-	geminiApiKey: string
-	transcriptionModelId: string
-	selectedChatModelId: string
-	selectedImageModelId: string
-	selectedMusicModelId: string
 	onWebSearchChange: (enabled: boolean) => void
-	onChatModelChange: (modelId: string) => void
-	onImageModelChange: (modelId: string) => void
-	onMusicModelChange: (modelId: string) => void
-	forcedNextIntent: GenerationIntent | null
-	onForceNextIntent: (intent: GenerationIntent | null) => void
 	onSubmit: (payload: ChatSubmitPayload) => void
 	onStop?: () => void
 	editingMessage?: StoredMessage | null
@@ -58,17 +56,7 @@ export function ChatInput({
 	disabled,
 	isGenerating,
 	webSearchEnabled,
-	geminiApiKey,
-	transcriptionModelId,
-	selectedChatModelId,
-	selectedImageModelId,
-	selectedMusicModelId,
 	onWebSearchChange,
-	onChatModelChange,
-	onImageModelChange,
-	onMusicModelChange,
-	forcedNextIntent,
-	onForceNextIntent,
 	onSubmit,
 	onStop,
 	editingMessage = null,
@@ -109,10 +97,7 @@ export function ChatInput({
 		startListening,
 		continueListening,
 		cancelListening,
-	} = useSpeechRecognition({
-		geminiApiKey,
-		transcriptionModelId,
-	})
+	} = useSpeechRecognition()
 
 	const isListening = status === 'listening'
 	const isTranscribing = status === 'transcribing'
@@ -203,7 +188,7 @@ export function ChatInput({
 
 		setPrompt(editingMessage.content)
 		setCursorPosition(editingMessage.content.length)
-		setAttachments(storedMediaToAttachments(editingMessage.media))
+		setAttachments(storedMessageToAttachments(editingMessage))
 		setAttachError(null)
 		resetSpeechState()
 
@@ -260,8 +245,9 @@ export function ChatInput({
 		}
 
 		let messageText = trimmed
+		// Files sent directly to Claude need no mention; library-only copies are read via tools.
 		const documentMentions = attachments
-			.filter((attachment) => attachment.type === 'document')
+			.filter((attachment) => attachment.type === 'document' && !attachment.file)
 			.map((attachment) => buildDocumentMention(attachment.name))
 
 		for (const mention of documentMentions) {
@@ -275,7 +261,6 @@ export function ChatInput({
 		onSubmit({
 			text: messageText,
 			attachments,
-			webSearchEnabled,
 			inputMethod,
 			editFromMessageId: editingMessage?.id,
 		})
@@ -299,24 +284,11 @@ export function ChatInput({
 			files.map(async (file) => {
 				if (!isUploadableDocumentFile(file)) {
 					throw new Error(
-						`${file.name} is not a supported document (.txt, .md, .html, .pdf, etc.).`,
+						`${file.name} is not a supported file (PDF, text, Markdown, or code).`,
 					)
 				}
 
-				const raw = await readUploadableDocumentContent(file)
-				const { content, contentFormat } = ingestUploadedDocumentContent(file, raw)
-				const title = getFileBaseName(file.name) || 'Uploaded document'
-				const document = await createDocument(title, content, {
-					source: 'upload',
-					contentFormat,
-				})
-
-				return {
-					id: crypto.randomUUID(),
-					type: 'document' as const,
-					name: document.title,
-					documentId: document.id,
-				}
+				return isPdfFile(file) ? preparePdfAttachment(file) : prepareTextAttachment(file)
 			}),
 		)
 
@@ -358,7 +330,7 @@ export function ChatInput({
 					throw new Error(`${file.name} is not an image file.`)
 				}
 
-				const { dataUrl, mimeType } = await readFileAsDataUrl(file)
+				const { dataUrl, mimeType } = await prepareImageForClaude(file)
 
 				return {
 					id: crypto.randomUUID(),
@@ -525,39 +497,6 @@ export function ChatInput({
 				</div>
 			) : null}
 
-			{webSearchEnabled || forcedNextIntent ? (
-				<div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-2">
-					{forcedNextIntent ? (
-						<>
-							<span className="rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
-								Next: {MODEL_CATEGORY_LABELS[forcedNextIntent]} generation
-							</span>
-							<button
-								type="button"
-								className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-								onClick={() => onForceNextIntent(null)}
-							>
-								Cancel
-							</button>
-						</>
-					) : null}
-					{webSearchEnabled ? (
-						<>
-							<span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground ring-1 ring-border">
-								Web search on
-							</span>
-							<button
-								type="button"
-								className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-								onClick={() => onWebSearchChange(false)}
-							>
-								Turn off
-							</button>
-						</>
-					) : null}
-				</div>
-			) : null}
-
 			{attachments.length > 0 ? (
 				<div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
 					{attachments.map((attachment) => (
@@ -565,13 +504,15 @@ export function ChatInput({
 							key={attachment.id}
 							className="flex items-center gap-2 rounded-full surface-panel px-3 py-1.5 text-xs"
 						>
-							{attachment.type === 'image' && attachment.dataUrl ? (
+							{attachment.type === 'image' ? (
 								<img
 									src={attachment.dataUrl}
 									alt=""
 									className="h-5 w-5 rounded object-cover"
 								/>
-							) : null}
+							) : (
+								<FileText className="h-3.5 w-3.5 text-muted-foreground" />
+							)}
 							<span className="max-w-[10rem] truncate">{attachment.name}</span>
 							<button
 								type="button"
@@ -608,15 +549,7 @@ export function ChatInput({
 					<ChatAttachMenu
 						disabled={disabled || isGenerating || isListening || isTranscribing}
 						webSearchEnabled={webSearchEnabled}
-						selectedChatModelId={selectedChatModelId}
-						selectedImageModelId={selectedImageModelId}
-						selectedMusicModelId={selectedMusicModelId}
 						onWebSearchChange={onWebSearchChange}
-						onChatModelChange={onChatModelChange}
-						onImageModelChange={onImageModelChange}
-						onMusicModelChange={onMusicModelChange}
-						forcedNextIntent={forcedNextIntent}
-						onForceNextIntent={onForceNextIntent}
 						onDocumentUpload={(files) => {
 							void handleDocumentUploads(files)
 						}}
@@ -710,22 +643,16 @@ export function ChatInput({
 			</div>
 
 			<p className="mx-auto mt-2 hidden max-w-3xl text-center text-xs text-muted-foreground md:block">
-				Use <span className="font-medium text-foreground">+</span> to attach one or
-				more files, or choose models. Type{' '}
+				Use <span className="font-medium text-foreground">+</span> to attach images,
+				PDFs, or text and code files, or toggle web search. Type{' '}
 				<span className="font-medium text-foreground">@</span> to reference documents.
 			</p>
 		</form>
 	)
 }
 
-function storedMediaToAttachments(
-	media: StoredMessage['media'],
-): ChatAttachment[] {
-	if (!media?.length) {
-		return []
-	}
-
-	return media
+function storedMessageToAttachments(message: StoredMessage): ChatAttachment[] {
+	const images: ChatAttachment[] = (message.media ?? [])
 		.filter((item) => item.type === 'image')
 		.map((item, index) => ({
 			id: crypto.randomUUID(),
@@ -734,4 +661,94 @@ function storedMediaToAttachments(
 			dataUrl: item.dataUrl,
 			mimeType: item.mimeType,
 		}))
+
+	const files: ChatAttachment[] = (message.attachments ?? []).map((file) => ({
+		id: crypto.randomUUID(),
+		type: 'document' as const,
+		name: file.name,
+		documentId: file.documentId,
+		file,
+	}))
+
+	return [...images, ...files]
+}
+
+/**
+ * PDFs within the size/page limits go to Claude as native documents (text and
+ * page images). A text copy is also saved to the library when one can be
+ * extracted; scanned PDFs skip that step.
+ */
+async function preparePdfAttachment(file: File): Promise<ChatAttachment> {
+	const { getPdfPageCount } = await import('@/utils/pdfText')
+	const pageCount = await getPdfPageCount(file).catch(() => Number.POSITIVE_INFINITY)
+	const fitsInline =
+		file.size <= MAX_PDF_ATTACHMENT_BYTES && pageCount <= MAX_PDF_ATTACHMENT_PAGES
+
+	let documentId: string | undefined
+	let title = getFileBaseName(file.name) || 'Uploaded PDF'
+	try {
+		const raw = await readUploadableDocumentContent(file)
+		const { content, contentFormat } = ingestUploadedDocumentContent(file, raw)
+		const document = await createDocument(title, content, {
+			source: 'upload',
+			contentFormat,
+		})
+		documentId = document.id
+		title = document.title
+	} catch (extractError) {
+		if (!fitsInline) {
+			throw extractError instanceof Error
+				? extractError
+				: new Error(`${file.name} could not be read.`)
+		}
+	}
+
+	if (!fitsInline) {
+		if (!documentId) {
+			throw new Error(`${file.name} is too large to attach.`)
+		}
+		// Too big to send whole; Claude reads the extracted text from the library instead.
+		return { id: crypto.randomUUID(), type: 'document', name: title, documentId }
+	}
+
+	const pdf: MessageFileAttachment = {
+		kind: 'pdf',
+		name: file.name,
+		mimeType: 'application/pdf',
+		data: await readFileAsBase64(file),
+		documentId,
+	}
+	return { id: crypto.randomUUID(), type: 'document', name: title, documentId, file: pdf }
+}
+
+async function prepareTextAttachment(file: File): Promise<ChatAttachment> {
+	const raw = await readTextFile(file)
+	const title = getFileBaseName(file.name) || 'Uploaded document'
+	const libraryContent = isCodeFile(file)
+		? `\`\`\`${getCodeFenceLanguage(file)}\n${raw.trimEnd()}\n\`\`\``
+		: raw
+	const { content, contentFormat } = ingestUploadedDocumentContent(file, libraryContent)
+	const document = await createDocument(title, content, {
+		source: 'upload',
+		contentFormat,
+	})
+
+	if (raw.length > MAX_TEXT_ATTACHMENT_CHARS) {
+		return { id: crypto.randomUUID(), type: 'document', name: document.title, documentId: document.id }
+	}
+
+	const textFile: MessageFileAttachment = {
+		kind: 'text',
+		name: file.name,
+		mimeType: file.type || 'text/plain',
+		data: raw,
+		documentId: document.id,
+	}
+	return {
+		id: crypto.randomUUID(),
+		type: 'document',
+		name: document.title,
+		documentId: document.id,
+		file: textFile,
+	}
 }

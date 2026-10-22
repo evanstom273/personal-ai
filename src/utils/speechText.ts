@@ -1,3 +1,5 @@
+import { stripCitationMarkers } from '@/services/claude/webResults'
+
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>()]+/gi
 const FENCED_CODE_BLOCK = /```[\s\S]*?```/g
 const INLINE_CODE = /`([^`]+)`/g
@@ -17,7 +19,7 @@ export function prepareTextForSpeech(markdown: string): string | null {
 		return null
 	}
 
-	let text = trimmed
+	let text = stripCitationMarkers(trimmed)
 	text = text.replace(FENCED_CODE_BLOCK, ' [code block omitted] ')
 	text = text.replace(INLINE_CODE, '$1')
 	text = text.replace(MARKDOWN_IMAGE, '$1')

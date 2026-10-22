@@ -15,9 +15,9 @@ export default defineConfig({
 			registerType: 'autoUpdate',
 			includeAssets: ['favicon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
 			manifest: {
-				name: 'Gemini Chat',
-				short_name: 'Gemini Chat',
-				description: 'Bring-your-own-key Gemini chat dashboard',
+				name: 'Personal AI',
+				short_name: 'Personal AI',
+				description: 'Bring-your-own-key personal assistant powered by Claude',
 				theme_color: '#0e1016',
 				background_color: '#0e1016',
 				display: 'standalone',

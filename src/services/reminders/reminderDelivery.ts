@@ -1,5 +1,5 @@
 import type { ReminderRecord, UserPreferences } from '@/storage/types'
-import { getConfiguredAiName } from '@/services/gemini/systemInstruction'
+import { getConfiguredAiName } from '@/services/claude/systemInstruction'
 import { formatMessageTime } from '@/utils/dateTime'
 
 export function buildReminderAssistantMessage(

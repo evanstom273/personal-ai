@@ -7,6 +7,7 @@ export type StoreName =
 	| 'memories'
 	| 'reminders'
 	| 'projects'
+	| 'usage'
 
 export const PROJECT_TASK_STATUS_OPTIONS = ['todo', 'doing', 'done'] as const
 
@@ -114,15 +115,19 @@ export interface LibraryMediaRecord {
 	updatedAt: number
 }
 
-export type GeminiApiKeySlot = 'paid' | 'free'
+export const CLAUDE_EFFORT_OPTIONS = ['low', 'medium', 'high'] as const
+
+export type ClaudeEffort = (typeof CLAUDE_EFFORT_OPTIONS)[number]
 
 export interface UserPreferences {
-	geminiApiKeyPaid: string
-	geminiApiKeyFree: string
-	activeGeminiApiKeySlot: GeminiApiKeySlot
-	defaultModelId: string
-	defaultImageModelId: string
-	defaultMusicModelId: string
+	anthropicApiKey: string
+	webSearchEnabled: boolean
+	claudeEffort: ClaudeEffort
+	/** 0 means no limit. */
+	dailySpendLimitUsd: number
+	/** 0 means no limit. */
+	monthlySpendLimitUsd: number
+	spendWarningsEnabled: boolean
 	userName: string
 	aiName: string
 	aiBehaviorInstructions: string
@@ -140,19 +145,19 @@ export interface UserPreferences {
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
-	geminiApiKeyPaid: '',
-	geminiApiKeyFree: '',
-	activeGeminiApiKeySlot: 'paid',
-	defaultModelId: 'gemini-3.6-flash',
-	defaultImageModelId: 'gemini-3.1-flash-image',
-	defaultMusicModelId: 'lyria-3-clip-preview',
+	anthropicApiKey: '',
+	webSearchEnabled: true,
+	claudeEffort: 'low',
+	dailySpendLimitUsd: 0,
+	monthlySpendLimitUsd: 0,
+	spendWarningsEnabled: true,
 	userName: '',
 	aiName: '',
 	aiBehaviorInstructions: '',
 	allowMatureContent: true,
 	memoryArchiveInterval: 20,
 	ttsReadAloudMode: 'never',
-	ttsVoiceName: 'Kore',
+	ttsVoiceName: '',
 	allowCodebaseInspection: false,
 	scratchpadContent: '',
 	enableFoldableDualPane: true,
@@ -198,6 +203,8 @@ export interface ConversationRecord {
 	modelId: string
 	messages: StoredMessage[]
 	memoryArchiveCursor: number
+	/** Extra instructions that apply only to this conversation. */
+	instructions?: string
 	createdAt: number
 	updatedAt: number
 }
@@ -207,9 +214,57 @@ export interface StoredMessage {
 	role: 'user' | 'assistant'
 	content: string
 	media?: MessageMedia[]
+	attachments?: MessageFileAttachment[]
 	documentLinks?: MessageDocumentLink[]
 	pendingDeleteConfirmation?: PendingDeleteConfirmation
+	web?: MessageWebActivity
+	usage?: MessageUsage
+	/** Shown under a reply that stopped early (length limit, refusal, user stop). */
+	stopNote?: string
 	createdAt: number
+}
+
+/** A PDF or text file sent to Claude alongside a user message. */
+export interface MessageFileAttachment {
+	kind: 'pdf' | 'text'
+	name: string
+	mimeType: string
+	/** Base64 for PDFs, raw text for text files. */
+	data: string
+	documentId?: string
+}
+
+export interface MessageSource {
+	url: string
+	title: string
+}
+
+export interface MessageWebActivity {
+	searchQueries: string[]
+	fetchedUrls: string[]
+	sources: MessageSource[]
+	failures: string[]
+}
+
+export interface UsageTotals {
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	webSearches: number
+	webFetches: number
+	requests: number
+	costUsd: number
+}
+
+export type MessageUsage = UsageTotals
+
+export type UsageFeature = 'chat' | 'memory' | 'documents' | 'scratchpad'
+
+export interface UsageDayRecord extends UsageTotals {
+	/** Local calendar day, YYYY-MM-DD. */
+	day: string
+	costByFeature: Partial<Record<UsageFeature, number>>
 }
 
 export interface PendingDeleteConfirmation {

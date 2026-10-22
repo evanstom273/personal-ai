@@ -1,10 +1,6 @@
-import { geminiFetch } from '@/services/gemini/client'
-import {
-	MAX_MEMORY_ARCHIVE_OUTPUT_TOKENS,
-	resolveEconomyModelId,
-} from '@/services/gemini/constants'
-import { applySafetySettingsToRequestBody } from '@/services/gemini/safetySettings'
-import { getConfiguredUserName } from '@/services/gemini/systemInstruction'
+import { completeJson } from '@/services/claude/complete'
+import { getConfiguredUserName } from '@/services/claude/systemInstruction'
+import { stripCitationMarkers } from '@/services/claude/webResults'
 import {
 	addMemoryEntries,
 	isMemoryCategory,
@@ -23,12 +19,27 @@ interface ExtractedMemoryItem {
 	category: MemoryCategory
 }
 
-interface GenerateContentResponse {
-	candidates?: Array<{
-		content?: {
-			parts?: Array<{ text?: string }>
-		}
-	}>
+const EXTRACTED_MEMORY_SCHEMA = {
+	type: 'object',
+	properties: {
+		memories: {
+			type: 'array',
+			items: {
+				type: 'object',
+				properties: {
+					content: { type: 'string' },
+					category: {
+						type: 'string',
+						enum: ['preference', 'fact', 'project', 'decision', 'other'],
+					},
+				},
+				required: ['content', 'category'],
+				additionalProperties: false,
+			},
+		},
+	},
+	required: ['memories'],
+	additionalProperties: false,
 }
 
 let archiveInProgress = false
@@ -38,53 +49,47 @@ function formatMessagesForArchive(messages: StoredMessage[]): string {
 	return messages
 		.map((message) => {
 			const speaker = message.role === 'user' ? 'User' : 'Assistant'
-			return `[${formatMessageDateTime(message.createdAt)}] ${speaker}: ${message.content.trim()}`
+			return `[${formatMessageDateTime(message.createdAt)}] ${speaker}: ${stripCitationMarkers(message.content).trim()}`
 		})
 		.join('\n\n')
 }
 
-function parseExtractedMemory(text: string): ExtractedMemoryItem[] {
-	const trimmed = text.trim()
-	const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
-	const jsonText = fenced?.[1]?.trim() ?? trimmed
-
-	try {
-		const parsed = JSON.parse(jsonText) as unknown
-		if (!Array.isArray(parsed)) {
-			return []
-		}
-
-		const items: ExtractedMemoryItem[] = []
-		for (const item of parsed) {
-			if (!item || typeof item !== 'object') {
-				continue
-			}
-
-			const record = item as Record<string, unknown>
-			const content =
-				typeof record.content === 'string' ? record.content.trim() : ''
-			const categoryValue =
-				typeof record.category === 'string' ? record.category : 'other'
-
-			if (!content) {
-				continue
-			}
-
-			items.push({
-				content,
-				category: isMemoryCategory(categoryValue) ? categoryValue : 'other',
-			})
-		}
-
-		return items
-	} catch {
+function normalizeExtractedMemory(parsed: unknown): ExtractedMemoryItem[] {
+	const list =
+		parsed && typeof parsed === 'object' && 'memories' in parsed
+			? (parsed as { memories: unknown }).memories
+			: parsed
+	if (!Array.isArray(list)) {
 		return []
 	}
+
+	const items: ExtractedMemoryItem[] = []
+	for (const item of list) {
+		if (!item || typeof item !== 'object') {
+			continue
+		}
+
+		const record = item as Record<string, unknown>
+		const content =
+			typeof record.content === 'string' ? record.content.trim() : ''
+		const categoryValue =
+			typeof record.category === 'string' ? record.category : 'other'
+
+		if (!content) {
+			continue
+		}
+
+		items.push({
+			content,
+			category: isMemoryCategory(categoryValue) ? categoryValue : 'other',
+		})
+	}
+
+	return items
 }
 
 async function extractMemoryFromBatch(
 	apiKey: string,
-	modelId: string,
 	messages: StoredMessage[],
 	preferences: UserPreferences,
 ): Promise<ExtractedMemoryItem[]> {
@@ -104,8 +109,8 @@ async function extractMemoryFromBatch(
 		'Read the conversation segment below and extract durable facts worth remembering long-term.',
 		'Focus on preferences, identity, ongoing projects, decisions, constraints, and recurring context.',
 		'Skip greetings, filler, transient tasks, and details already captured in existing memory.',
-		'Return ONLY a JSON array. Each item: { "content": string, "category": "preference"|"fact"|"project"|"decision"|"other" }.',
-		'If nothing is worth saving, return [].',
+		'Write each memory as a short standalone sentence and pick its category.',
+		'If nothing is worth saving, return an empty memories list.',
 		'',
 		'Existing memory (avoid duplicates):',
 		existingSummary,
@@ -114,38 +119,15 @@ async function extractMemoryFromBatch(
 		formatMessagesForArchive(messages),
 	].join('\n')
 
-	const response = await geminiFetch<GenerateContentResponse>(
+	const parsed = await completeJson<unknown>({
 		apiKey,
-		`/models/${modelId}:generateContent`,
-		{
-			method: 'POST',
-			body: JSON.stringify(
-				applySafetySettingsToRequestBody(
-					{
-						contents: [
-							{
-								role: 'user',
-								parts: [{ text: prompt }],
-							},
-						],
-						generationConfig: {
-							temperature: 0.2,
-							maxOutputTokens: MAX_MEMORY_ARCHIVE_OUTPUT_TOKENS,
-						},
-					},
-					preferences.allowMatureContent ?? true,
-				),
-			),
-		},
-	)
+		preferences,
+		feature: 'memory',
+		prompt,
+		schema: EXTRACTED_MEMORY_SCHEMA,
+	})
 
-	const text =
-		response.candidates?.[0]?.content?.parts
-			?.map((part) => part.text ?? '')
-			.join('\n')
-			.trim() ?? ''
-
-	return parseExtractedMemory(text)
+	return normalizeExtractedMemory(parsed)
 }
 
 export function getUnarchivedMessages(
@@ -167,7 +149,6 @@ export async function archiveConversationIfNeeded(
 
 	archiveInProgress = true
 	let nextConversation = conversation
-	const economyModelId = resolveEconomyModelId(preferences.defaultModelId)
 
 	try {
 		do {
@@ -183,7 +164,6 @@ export async function archiveConversationIfNeeded(
 			const batch = unarchived.slice(0, interval)
 			const extracted = await extractMemoryFromBatch(
 				apiKey,
-				economyModelId,
 				batch,
 				preferences,
 			)
@@ -236,7 +216,7 @@ export async function runManualMemoryArchive(
 	}
 
 	if (!apiKey.trim()) {
-		throw new Error('Add a Gemini API key in Settings → API to archive memory.')
+		throw new Error('Add your Anthropic API key in Settings → API to archive memory.')
 	}
 
 	archiveInProgress = true
@@ -244,7 +224,6 @@ export async function runManualMemoryArchive(
 	let batchesProcessed = 0
 	let messagesArchived = 0
 	let memoriesAdded = 0
-	const economyModelId = resolveEconomyModelId(preferences.defaultModelId)
 
 	try {
 		const interval = Math.max(1, preferences.memoryArchiveInterval)
@@ -262,7 +241,6 @@ export async function runManualMemoryArchive(
 			const batch = unarchived.slice(0, batchSize)
 			const extracted = await extractMemoryFromBatch(
 				apiKey,
-				economyModelId,
 				batch,
 				preferences,
 			)

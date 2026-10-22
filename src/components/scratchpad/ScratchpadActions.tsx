@@ -10,11 +10,10 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { usePreferencesContext } from '@/providers/ChatProvider'
-import { getActiveGeminiApiKey, hasGeminiApiKey } from '@/storage/geminiApiKeys'
 import { useScratchpad } from '@/providers/ScratchpadProvider'
 import { createDocument } from '@/services/documents/documentService'
 import { createProject, createTask, listProjects } from '@/services/projects/projectService'
-import { getEconomyModelId } from '@/services/gemini/modelPreferences'
+import { describeClaudeError } from '@/services/claude/client'
 import {
 	extractScratchpadTasks,
 	organizeScratchpadIntoDocument,
@@ -151,8 +150,8 @@ export function useScratchpadActions() {
 	const pendingTasksRef = useRef<Array<{ title: string; note?: string }>>([])
 
 	function ensureApiKey(): boolean {
-		if (!hasGeminiApiKey(preferences)) {
-			setError('Add your Gemini API key in Settings first.')
+		if (!preferences.anthropicApiKey.trim()) {
+			setError('Add your Anthropic API key in Settings first.')
 			return false
 		}
 		return true
@@ -171,8 +170,7 @@ export function useScratchpadActions() {
 		setError(null)
 		try {
 			const organized = await organizeScratchpadIntoDocument({
-				apiKey: getActiveGeminiApiKey(preferences),
-				modelId: getEconomyModelId(preferences.defaultModelId),
+				apiKey: preferences.anthropicApiKey,
 				preferences,
 				rawText: content,
 			})
@@ -186,7 +184,7 @@ export function useScratchpadActions() {
 			navigate(`/library/documents/${document.id}`)
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : 'Could not organize scratchpad.',
+				caught instanceof Error ? describeClaudeError(caught) : 'Could not organize scratchpad.',
 			)
 		} finally {
 			setBusy(false, null)
@@ -206,8 +204,7 @@ export function useScratchpadActions() {
 		setError(null)
 		try {
 			const extracted = await extractScratchpadTasks({
-				apiKey: getActiveGeminiApiKey(preferences),
-				modelId: getEconomyModelId(preferences.defaultModelId),
+				apiKey: preferences.anthropicApiKey,
 				preferences,
 				rawText: content,
 			})
@@ -216,7 +213,7 @@ export function useScratchpadActions() {
 			setProjectDialogOpen(true)
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : 'Could not extract tasks.',
+				caught instanceof Error ? describeClaudeError(caught) : 'Could not extract tasks.',
 			)
 		} finally {
 			setBusy(false, null)

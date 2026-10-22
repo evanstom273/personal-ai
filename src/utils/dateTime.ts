@@ -17,27 +17,15 @@ export function formatMessageTime(timestamp: number): string {
 	}).format(new Date(timestamp))
 }
 
-export function formatCurrentDateTimeContext(now = new Date()): string {
+/** Date only, so a prompt that includes it stays cacheable for the whole day. */
+export function formatCurrentDateContext(now = new Date()): string {
 	const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 	const formatted = new Intl.DateTimeFormat(undefined, {
 		weekday: 'long',
 		year: 'numeric',
 		month: 'long',
 		day: 'numeric',
-		hour: 'numeric',
-		minute: '2-digit',
-		second: '2-digit',
-		timeZoneName: 'short',
 	}).format(now)
 
-	return `${formatted} (${timeZone})`
-}
-
-export function formatMessageForModel(
-	content: string,
-	createdAt: number,
-	role: 'user' | 'assistant',
-): string {
-	const speaker = role === 'user' ? 'User' : 'Assistant'
-	return `[${speaker} · ${formatMessageDateTime(createdAt)}]\n${content}`
+	return `${formatted} (time zone ${timeZone})`
 }

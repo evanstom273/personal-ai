@@ -17,11 +17,11 @@ User prefers tabs for indentation, minimal diffs, and stacking work on one open 
 
 ## What this is
 
-**Personal AI** (package name: `gemini-chat-dashboard`) is a bring-your-own-key **Gemini chat PWA**.
+**Personal AI** (package name: `personal-ai`) is a bring-your-own-key **Claude chat PWA** (Claude Haiku 5.5 only, since v3.0.0 — Gemini was removed).
 
 - React + Vite + TypeScript + Tailwind
-- **IndexedDB** for API keys, conversations, documents, library media, memories, reminders
-- Gemini called **directly from the browser** (no backend yet)
+- **IndexedDB** for the API key, conversations, documents, library media, memories, reminders, usage
+- Claude called **directly from the browser** via `@anthropic-ai/sdk` (`dangerouslyAllowBrowser`), no backend
 - Installable PWA with service worker
 
 ---
@@ -51,9 +51,9 @@ Home · Chat · Library · Settings
 | Route | Purpose |
 |-------|---------|
 | `/home` | Home hub |
-| `/chat` | Main Gemini conversation |
+| `/chat` | Conversations with Claude |
 | `/library` | Tabs: Schedule, Projects, Documents |
-| `/settings` | Tabs: Profile, Memory, API, Voice, App |
+| `/settings` | Tabs: Profile, Memory, API, Usage, Voice, App |
 | `/memory` | Linked from Settings |
 
 ### Theme
@@ -70,9 +70,9 @@ src/
   layout/                AppShell, BottomNav
   pages/                 Route pages
   providers/             ChatProvider (chat + reminders + TTS wiring)
-  services/gemini/       API client, tools, system instruction
+  services/claude/       API client, chat loop, tools, prompts, pricing
   services/reminders/    Reminder CRUD, scheduler, OS notification triggers
-  storage/               IndexedDB (db v5 includes reminders store)
+  storage/               IndexedDB (db v7; name is still `gemini-chat` to keep existing data)
 public/
   notification-sw.js     Notification click handler (imported by Workbox)
 ```
@@ -88,7 +88,7 @@ public/
 ### Reminders & schedule
 - IndexedDB `reminders` store
 - Library → **Schedule** tab for manual CRUD
-- Gemini tools: `list_reminders`, `create_reminder`, `update_reminder`, `delete_reminder`
+- Claude tools: `list_reminders`, `create_reminder`, `update_reminder`, `delete_reminder`
 - In-app scheduler (30s poll + on visibility change) posts assistant chat message + notification when due
 - System time injected via `scheduleContext.ts`
 

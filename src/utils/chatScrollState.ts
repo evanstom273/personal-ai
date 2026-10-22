@@ -1,16 +1,16 @@
-const SCROLL_KEY = 'gemini-chat-scroll-top'
+const SCROLL_KEY_PREFIX = 'personal-ai-chat-scroll-top:'
 
-export function saveChatScrollTop(scrollTop: number): void {
+export function saveChatScrollTop(scrollTop: number, conversationId = 'default'): void {
 	try {
-		sessionStorage.setItem(SCROLL_KEY, String(scrollTop))
+		sessionStorage.setItem(`${SCROLL_KEY_PREFIX}${conversationId}`, String(scrollTop))
 	} catch {
 		// ignore storage failures
 	}
 }
 
-export function readChatScrollTop(): number | null {
+export function readChatScrollTop(conversationId = 'default'): number | null {
 	try {
-		const raw = sessionStorage.getItem(SCROLL_KEY)
+		const raw = sessionStorage.getItem(`${SCROLL_KEY_PREFIX}${conversationId}`)
 		if (raw === null) {
 			return null
 		}

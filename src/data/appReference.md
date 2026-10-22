@@ -1,10 +1,10 @@
 # Personal AI — Application Reference
 
-This document describes how the **Personal AI** app works. It is injected into the assistant's system context on every chat message so the AI understands its own architecture, capabilities, and constraints.
+This document describes how the **Personal AI** app works. It is included in the assistant's context so the AI understands its own architecture, capabilities, and constraints.
 
 **Repository:** `evanstom273/personal-ai`  
 **Live site:** GitHub Pages PWA  
-**Stack:** React 19 + TypeScript + Vite + Tailwind CSS 4 + IndexedDB (`idb`) + Google Gemini API
+**Stack:** React 19 + TypeScript + Vite + Tailwind CSS 4 + IndexedDB (`idb`) + Anthropic Claude API (`@anthropic-ai/sdk`)
 
 ---
 
@@ -12,155 +12,118 @@ This document describes how the **Personal AI** app works. It is injected into t
 
 Personal AI is a self-hosted progressive web app (PWA) with an optional **Capacitor Android** build. It provides:
 
-- A **continuous Gemini chat** with streaming, tool use, and optional Google Search grounding
-- **Image** and **music** generation via separate Gemini models (routed automatically from natural language)
+- **Chat with Claude Haiku 5.5** (`claude-haiku-5-5`, the only model) with streaming, app tools, and Anthropic's server-side **web search** and **web fetch**
+- **Multiple conversations** (create, switch, rename, delete, per-conversation instructions)
+- Understanding of attached **images, PDFs, and text/code files**
 - A **document library** with rich-text editing and inline AI writing assistance
 - **Kanban projects** (todo / doing / done) with task cards, checklists, and document/reminder links
 - **Scheduled reminders** that post chat messages and can trigger system notifications
-- **Long-term memory** archived from chat batches
-- **Speech-to-text** input and **Gemini TTS** read-aloud for replies
-- **Import/export** of chat and documents
+- A **Home to-do list**
+- **Long-term memory** archived from chat batches, plus explicit "remember this" saves
+- **Local usage and cost tracking** with optional daily/monthly spending limits
+- Voice input and read-aloud using the browser's built-in speech features
+- **Import/export** of chats and documents
 
-All user data lives **locally in the browser** (IndexedDB). The Gemini API key is stored in preferences on-device and sent directly to Google from the client.
+The app does **not** generate images, music, audio, or video.
+
+All user data lives **locally in the browser** (IndexedDB). The user's Anthropic API key is stored on-device and sent directly from the browser to `api.anthropic.com` — there is no backend server.
 
 ---
 
 ## 2. Navigation and pages
 
-The app uses React Router with a bottom navigation dock (Home, Chat, Library, Settings).
+React Router with a bottom navigation dock (Home, Chat, Library, Settings).
 
 | Route | Page | Purpose |
 |-------|------|---------|
-| `/home` | HomePage | Dashboard / entry |
-| `/chat` | ChatPage | Main continuous conversation |
-| `/library` | LibraryPage | Schedule, Projects, Documents tabs |
+| `/home` | HomePage | Dashboard: to-dos, upcoming reminders, recent documents, active projects |
+| `/chat` | ChatPage | Conversations with the assistant |
+| `/library` | LibraryPage | Schedule, Projects, Documents (Docs and Images tabs) |
 | `/library/projects/:projectId` | ProjectBoardPage | Kanban board for one project |
 | `/library/documents/:documentId` | DocumentEditorPage | Rich-text document editor |
 | `/memory` | MemoryPage | Browse archived memory facts |
-| `/settings` | SettingsPage | Profile, Memory, API, Voice, App tabs |
+| `/settings` | SettingsPage | Profile, Memory, API, Usage, Voice, App tabs |
 
-**Mobile UX:** Swipe left/right navigates between main tabs and settings sub-tabs with a short fade transition. Swipe is disabled on project boards and document editors.
+**Mobile UX:** swipe left/right moves between main tabs and settings sub-tabs. Wide and foldable screens can show a dual-pane layout with chat pinned on the left.
 
-**App shell:** `src/layout/AppShell.tsx` — header (hidden on document/project editors), main content outlet, bottom nav.
+The chat header has a **conversations menu** (new, switch, rename, conversation instructions, delete) plus export, import, and clear buttons.
 
 ---
 
 ## 3. Data storage (IndexedDB)
 
-Database name: `gemini-chat` (version 6). Generic API in `src/storage/storageService.ts`.
+Database name: `gemini-chat` (version 7 — the name predates the move to Claude and is kept so existing data stays put). Generic API in `src/storage/storageService.ts`.
 
-| Store | Type | Description |
-|-------|------|-------------|
-| `preferences` | `UserPreferences` | API key, model IDs, user/AI names, behaviour, TTS, memory interval |
-| `conversations` | `ConversationRecord` | Single continuous chat thread |
-| `documents` | `DocumentRecord` | Markdown or HTML documents |
-| `projects` | `ProjectRecord` | Kanban projects with embedded tasks |
-| `reminders` | `ReminderRecord` | Scheduled reminders with recurrence |
-| `memories` | `MemoryEntry` | Facts archived from chat |
-| `libraryMedia` | `LibraryMediaRecord` | Generated/uploaded images and audio |
-| `cache` | misc | Internal cache |
+| Store | Description |
+|-------|-------------|
+| `preferences` | `UserPreferences` (API key, names, behaviour, web search toggle, effort, spending limits, voice) and the active conversation id |
+| `conversations` | One `ConversationRecord` per conversation (messages, memory archive cursor, optional instructions) |
+| `documents` | Markdown or HTML documents |
+| `projects` | Kanban projects with embedded tasks |
+| `reminders` | Scheduled reminders with recurrence |
+| `memories` | Facts archived from chat |
+| `libraryMedia` | Uploaded images (and media generated by earlier versions of the app) |
+| `usage` | Per-day API usage and estimated cost |
+| `cache` | Internal data such as the conversation index |
 
-### UserPreferences fields
-
-- `geminiApiKey` — Google AI API key
-- `defaultModelId` — chat model (e.g. `gemini-3.6-flash`)
-- `defaultImageModelId` — image generation model
-- `defaultMusicModelId` — music generation model
-- `userName`, `aiName`, `aiBehaviorInstructions` — identity and custom instructions
-- `allowMatureContent` — relaxes safety filters when true
-- `memoryArchiveInterval` — messages between memory archive passes (5/10/15/20)
-- `ttsReadAloudMode` — never / after_speech / always
-- `ttsVoiceName` — Gemini TTS voice
-- `allowCodebaseInspection` — whether read-only source code tools are available
+Stored assistant messages keep the reply text (with inline citation links), web sources and search queries, document links, and estimated usage/cost. User messages keep attached images and files.
 
 ---
 
 ## 4. AI system architecture
 
-### 4.1 System instruction assembly
+### 4.1 Prompt assembly and caching
 
-Every chat request builds a full system instruction in `src/services/gemini/documentContext.ts` → `buildFullSystemInstruction()`:
+Each reply builds its system prompt once (`src/services/claude/documentContext.ts` → `buildFullSystemInstruction()`), in two cached blocks:
 
-1. **Base instruction** (`systemInstruction.ts`) — AI name, user name, datetime, behaviour, mature content policy, app capability rules
-2. **App reference** (`appReferenceContext.ts`) — this document (always injected)
-3. **Memory context** (`memoryContext.ts`) — archived facts (up to ~48k chars)
-4. **Schedule context** (`scheduleContext.ts`) — active reminders (up to 40)
-5. **Project context** (`projectContext.ts`) — all kanban projects and tasks
-6. **Document library context** (`documentContext.ts`) — all documents (12k each, 120k total cap)
+1. **Stable block** — persona and behaviour (`systemInstruction.ts`), app capabilities and tool rules, and this reference
+2. **Context block** — today's date, conversation instructions, long-term memory (about 12k characters; older entries reachable with `search_memory`), active reminders, projects (about 12k characters), and the document catalog (titles, ids, short previews)
 
-Document inline AI (`documentWriting.ts`) uses only the base system instruction plus the current document slice.
+The exact time comes from the `[Sent …]` line on each user message, so the system prompt stays the same all day and prompt caching keeps repeat context cheap. Recent unarchived messages (up to 40, within a size budget) are replayed; older messages live on through memory. Images and files are only replayed for the most recent user messages.
 
 ### 4.2 Chat generation flow
 
 `useChatGeneration` → `generateChatWithTools` (`chatWithTools.ts`):
 
-1. Resolve intent (`intent.ts`) — chat vs image vs music from natural language
-2. For chat: stream Gemini with tools, up to 8 tool-loop iterations
-3. Messages include timestamps via `formatMessageForModel`
-4. Optional Google Search grounding when web search is enabled
-5. Background generation continues if user leaves chat; notification on completion
+1. Check the local spending limit, save the user message
+2. Stream Claude Haiku 5.5 (adaptive thinking, effort from settings — low by default)
+3. Run app tool calls locally and send results back (up to 6 rounds per reply); web search/fetch run on Anthropic's servers
+4. Assemble the reply: text from every step, numbered citation links, a sources list, and per-reply cost
+5. Queue memory archiving; notify if the user is elsewhere in the app
 
-### 4.3 Available Gemini models
+Users can stop a reply (partial text is kept), regenerate the latest reply, or edit an earlier message and resend.
 
-Defined in `src/services/gemini/models.ts`:
+### 4.3 Tools
 
-- **Chat:** gemini-3.6-flash, gemini-3.1-pro-preview
-- **Image:** gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image
-- **Music:** lyria-3-pro-preview, lyria-3-clip-preview
-- **TTS:** gemini-3.1-flash-tts-preview (via synthesizeSpeech.ts)
+**Document tools** (`documentTools.ts`): `list_documents`, `read_document`, `create_document`, `update_document`, `rename_document`, `delete_document` (delete needs UI confirmation)
 
-### 4.4 Function-calling tools
+**Project tools** (`projectTools.ts`): `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `create_task`, `update_task`, `move_task`, `delete_task`
 
-**Document tools** (`documentTools.ts`):
-- `list_documents`, `read_document`, `create_document`, `update_document`, `rename_document`, `delete_document` (delete requires UI confirmation)
+**Reminder tools** (`reminderTools.ts`): `list_reminders`, `create_reminder`, `update_reminder`, `delete_reminder`
 
-**Project tools** (`projectTools.ts`):
-- `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`
-- `create_task`, `update_task`, `move_task`, `delete_task`
+**Home to-do tools** (`homeTodoTools.ts`): `list_home_todos`, `add_home_todo`, `update_home_todo`, `remove_home_todo`, `set_home_todos`, `clear_completed_home_todos`
 
-**Reminder tools** (`reminderTools.ts`):
-- `list_reminders`, `create_reminder`, `update_reminder`, `delete_reminder`
+**Memory tools** (`memoryTools.ts`): `search_memory`, `save_memory` (only when the user asks to remember something)
 
-**Codebase tools** (`codebaseTools.ts`) — read-only, when enabled in settings:
-- `list_source_files` — list bundled source paths
-- `read_source_file` — read a source file by path
-- `search_source_code` — search text/regex across source
+**Codebase tools** (`codebaseTools.ts`, read-only, when enabled in settings): `list_source_files`, `read_source_file`, `search_source_code`
 
-**Server-side:** Google Search when web search toggle is on in chat.
+**Anthropic server tools** (when web search is on): `web_search` (up to 5 per reply, about $0.01 each) and `web_fetch` (up to 3 pages per reply, token cost only; can only fetch URLs that already appeared in the conversation)
 
 ---
 
 ## 5. Documents
 
-### Storage
-
 `DocumentRecord`: id, title, content, `contentFormat` (markdown | html), `source` (user | assistant | upload), `readOnly`, timestamps.
 
-### Editor
+TipTap rich-text editor (`DocumentEditor.tsx`) with formatting toolbar, autosave, and **inline AI writing** (Expand, Rewrite, Shorten, Make clearer, Continue writing, Ask AI — previewed before accepting). Documents are shared between the user and the assistant.
 
-TipTap rich-text editor (`DocumentEditor.tsx`) with:
-- Formatting: bold, italic, headings 1–4, lists, quotes, links, colours, highlight, alignment, horizontal rule
-- Toolbar at **bottom** of editor (above nav dock) for mobile selection-bar compatibility
-- **Inline AI writing:** Expand, Rewrite, Shorten, Make clearer, Continue writing, Ask AI — preview before accept
-- Autosave every 800ms silently in background
-
-### Content pipeline
-
-`documentContent.ts` converts HTML ↔ Markdown for storage. User documents are shared between the user and the assistant — no separate AI document store.
+Files attached in chat are also saved to the library: PDFs as extracted text, code files as fenced code blocks.
 
 ---
 
 ## 6. Projects (Kanban)
 
-`ProjectRecord` contains title, description, linked document IDs, and `tasks[]`.
-
-Each `ProjectTaskRecord` has: title, note, status (todo | doing | done), position, checklist items, linked document IDs, optional reminder ID.
-
-**Board UX** (`ProjectBoardPage.tsx`):
-- Vertical collapsible columns
-- Drag-and-drop between columns (`@dnd-kit`)
-- Inline checklist toggles on cards
-- Task editor dialog with auto-save (350ms debounce, silent, optimistic local updates)
+`ProjectRecord` contains title, description, linked document IDs, and `tasks[]`. Each task has a title, note, status (todo | doing | done), position, checklist items, linked document IDs, and an optional reminder ID. The board supports drag-and-drop between columns and a task editor with auto-save.
 
 ---
 
@@ -168,42 +131,27 @@ Each `ProjectTaskRecord` has: title, note, status (todo | doing | done), positio
 
 `ReminderRecord`: title, note, delivery message, scheduledAt, recurrence (none/daily/weekly/monthly/yearly), enabled, source.
 
-**Delivery** (`reminderDelivery.ts`, `reminderScheduler.ts`):
-- When due: posts assistant chat message, may show notification
-- One-shot reminders are **deleted** after firing
-- Capacitor Android: `LocalNotifications` for background alerts
-- PWA: notification triggers where supported
+When a reminder is due, the app posts the assistant's delivery message in the current conversation and can show a notification. One-shot reminders are removed after firing. The Android app uses Capacitor Local Notifications for alerts while closed; the PWA uses notification triggers where the browser supports them, otherwise reminders fire while the app is open.
 
 ---
 
 ## 8. Memory
 
-After every N new chat messages (`memoryArchiveInterval`), `memoryArchive.ts` sends a batch to Gemini to extract durable facts into `memories` store.
-
-Categories: preference, fact, project, decision, other.
-
-Memory index is injected on every chat message. Older chat messages are not all in the prompt — only recent window + memory index.
+After every N new messages in a conversation (`memoryArchiveInterval`), `memoryArchive.ts` asks Claude (low effort, structured JSON output) to extract durable facts into the `memories` store. Categories: preference, fact, project, decision, other. Users can browse memory on the Memory page and clear it in Settings.
 
 ---
 
-## 9. Library media
+## 9. Attachments
 
-Generated images and music from chat are saved to `libraryMedia` store as data URLs.
-
-Library page tabs: Docs, Images, Music. Upload support for documents and media.
+- **Images:** resized on-device to about 1.15 megapixels (JPEG/PNG/GIF/WebP) and sent as image blocks
+- **PDFs:** up to 10 MB and 40 pages are sent as native PDF documents (Claude sees text and page images); larger PDFs fall back to extracted text in the library
+- **Text, Markdown, and code files:** sent as plain-text documents (up to about 60k characters)
 
 ---
 
-## 10. Chat features
+## 10. Usage and cost
 
-- **Single continuous conversation** — no per-thread model; one `ConversationRecord`
-- **Streaming** assistant replies with markdown rendering
-- **Edit & resend** messages (truncates subsequent messages)
-- **Attachments:** images, audio, PDF text extraction
-- **Document mentions** in chat input (`@document`)
-- **Export:** ZIP with separate media files
-- **Web search** toggle for Google Search grounding
-- **PWA auto-update:** service worker skips waiting and reloads on new deploy
+Each response's token usage is turned into an estimated cost (Haiku 5.5: $0.10 input, $0.50 output, $0.01 cache read per million tokens; requests over 100k prompt tokens cost 5×; web search $10 per 1,000). Totals are stored per day. Settings → Usage shows today and this month, cost by feature, and optional daily/monthly limits that block new requests from this app (they cannot limit the API key elsewhere).
 
 ---
 
@@ -211,20 +159,20 @@ Library page tabs: Docs, Images, Music. Upload support for documents and media.
 
 | Tab | Contents |
 |-----|----------|
-| Profile | User name, AI name, behaviour instructions, mature content toggle |
-| Memory | Archive interval slider, link to Memory page |
-| API | Gemini API key, validation, model catalog, web search info |
-| Voice | STT notes, TTS read-aloud mode, voice picker |
-| App | Notifications, reminders behaviour, background replies, **app reference download**, codebase inspection toggle |
+| Profile | User name, AI name, behaviour instructions, mature-language toggle |
+| Memory | Archive interval, manual archive, clear memory |
+| API | Anthropic API key, key test, reasoning effort, web search toggle |
+| Usage | Cost totals, spending limits, pricing reference |
+| Voice | Speech input notes, read-aloud mode and voice |
+| App | Dual-pane, notifications, reminders, changelog, app reference download, codebase inspection |
 
 ---
 
 ## 12. PWA and Android
 
 - **Vite PWA plugin** with Workbox — precaches assets, `skipWaiting` + `clientsClaim`
-- **Capacitor 8** Android project in `/android` for native APK builds
-- **Safe areas** respected for notched devices and bottom nav inset
-- Deployed to GitHub Pages (`/personal-ai/` base path)
+- **Capacitor 8** Android project in `/android`
+- Deployed to GitHub Pages (`/personal-ai/` base path) by GitHub Actions on pushes to `main`
 
 ---
 
@@ -232,54 +180,20 @@ Library page tabs: Docs, Images, Music. Upload support for documents and media.
 
 ```
 src/
-  App.tsx                    — routes
-  main.tsx                   — entry, PWA registration
-  layout/AppShell.tsx        — shell, header, bottom nav
-  layout/BottomNav.tsx       — navigation dock
-  pages/                     — route pages
-  components/                — UI components
-    chat/                    — chat input, messages, markdown
-    documents/               — editor, AI preview dialogs
-    projects/                — project list
-    schedule/                — reminders UI
-  providers/ChatProvider.tsx — wires preferences, chat, TTS, reminders
-  hooks/                     — React hooks for data and features
+  App.tsx, main.tsx           — routes and entry
+  layout/                     — AppShell, BottomNav
+  pages/                      — route pages
+  components/chat/            — chat input, messages, markdown, conversation menu
+  components/settings/        — usage settings
+  providers/ChatProvider.tsx  — preferences, conversations, generation, TTS, reminders
+  hooks/                      — data and feature hooks
   services/
-    gemini/                  — API client, chat, tools, context builders
-    documents/               — document CRUD
-    projects/                — project CRUD + tools
-    reminders/               — reminder CRUD, scheduler, notifications
-    memory/                  — archive + memory service
-    library/                 — media persistence
-  storage/                   — IndexedDB types, db, storageService
-  utils/                     — helpers (downloads, export, speech, etc.)
+    claude/                   — API client, chat loop, prompts, pricing, web results
+    usage/                    — local usage ledger and spending limits
+    documents/ projects/ reminders/ memory/ library/ home/ scratchpad/
+  storage/                    — IndexedDB types, db, storageService
+  utils/                      — helpers (attachments, export, speech, etc.)
   data/
-    appReference.md          — this document
+    appReference.md           — this document
     sourceCodeIndex.generated.ts — bundled source for inspection tools
 ```
-
----
-
-## 14. Constraints the AI must respect
-
-1. **Video generation is not supported** — offer image or music instead
-2. **One continuous chat** — no separate conversation threads
-3. **Documents are shared** — no private AI-only document store
-4. **Delete document requires UI confirmation** — tool returns `confirmation_required`
-5. **All data is local** — cannot access server-side user data beyond what's in IndexedDB context
-6. **Codebase inspection is read-only** — use codebase tools only when the user asks about how the app works internally; never imply you can modify source code
-7. **API key is user-provided** — stored locally, not in this document
-
----
-
-## 15. Context limits
-
-When data is too large for the prompt, sections are truncated with a notice. Use tools to fetch full content:
-
-- `read_document` for full document text
-- `get_project` for full project/task detail
-- `read_source_file` / `search_source_code` for implementation details
-
----
-
-*This reference is bundled with the app and updated on each deploy. The user can download a copy from Settings → App.*

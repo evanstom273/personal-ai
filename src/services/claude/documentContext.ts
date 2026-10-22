@@ -4,16 +4,20 @@ import {
 	htmlToMarkdown,
 	normalizeDocumentRecord,
 } from '@/utils/documentContent'
-import { buildAppReferenceContext } from '@/services/gemini/appReferenceContext'
-import { buildMemoryContextFromStore } from '@/services/gemini/memoryContext'
-import { buildProjectContextFromStore } from '@/services/gemini/projectContext'
-import { buildScheduleContextFromStore } from '@/services/gemini/scheduleContext'
-import { buildSystemInstruction } from '@/services/gemini/systemInstruction'
-import type { UserPreferences } from '@/storage/types'
+import { buildAppReferenceContext } from '@/services/claude/appReferenceContext'
+import { buildMemoryContextFromStore } from '@/services/claude/memoryContext'
+import { buildProjectContextFromStore } from '@/services/claude/projectContext'
+import { buildScheduleContextFromStore } from '@/services/claude/scheduleContext'
+import {
+	buildChatCapabilitiesInstruction,
+	buildSystemInstruction,
+} from '@/services/claude/systemInstruction'
+import type { ConversationRecord, UserPreferences } from '@/storage/types'
+import { formatCurrentDateContext } from '@/utils/dateTime'
 
 const MAX_READ_DOCUMENT_CHARS = 12_000
-const MAX_CATALOG_PREVIEW_CHARS = 200
-const MAX_TOTAL_CATALOG_CHARS = 24_000
+const MAX_CATALOG_PREVIEW_CHARS = 140
+const MAX_TOTAL_CATALOG_CHARS = 12_000
 
 export function truncateDocumentTextForTool(text: string): {
 	text: string
@@ -90,15 +94,51 @@ export function buildDocumentLibraryContext(
 	return `${header}${entries.join('\n')}${omittedNote}`
 }
 
+export interface ChatSystemPrompt {
+	/** Persona, capabilities, and app reference. Changes only when settings change. */
+	stable: string
+	/** Today's date, memory, and library catalogs. Changes when the user's data does. */
+	context: string
+}
+
+/**
+ * Builds the chat system prompt in two cacheable parts. The current time is not
+ * included here (each user message carries its own timestamp), so the prompt
+ * cache survives from one message to the next.
+ */
 export async function buildFullSystemInstruction(
 	preferences: UserPreferences,
-): Promise<string> {
-	const documents = await listDocuments()
-	const base = buildSystemInstruction(preferences)
-	const appReferenceContext = buildAppReferenceContext()
-	const memoryContext = await buildMemoryContextFromStore()
-	const scheduleContext = await buildScheduleContextFromStore()
-	const projectContext = await buildProjectContextFromStore()
-	const libraryContext = buildDocumentLibraryContext(documents)
-	return `${base}\n\n${appReferenceContext}\n\n${memoryContext}\n\n${scheduleContext}\n\n${projectContext}\n\n${libraryContext}`
+	conversation?: Pick<ConversationRecord, 'title' | 'instructions'> | null,
+): Promise<ChatSystemPrompt> {
+	const [documents, memoryContext, scheduleContext, projectContext] =
+		await Promise.all([
+			listDocuments(),
+			buildMemoryContextFromStore(),
+			buildScheduleContextFromStore(),
+			buildProjectContextFromStore(),
+		])
+
+	const stable = [
+		buildSystemInstruction(preferences),
+		buildChatCapabilitiesInstruction(),
+		buildAppReferenceContext(),
+	].join('\n\n')
+
+	const conversationInstructions = conversation?.instructions?.trim()
+	const contextSections = [
+		`Today's date: ${formatCurrentDateContext()}.`,
+		conversationInstructions
+			? [
+					`## Instructions for this conversation ("${conversation?.title ?? 'Chat'}")`,
+					'',
+					conversationInstructions,
+				].join('\n')
+			: null,
+		memoryContext,
+		scheduleContext,
+		projectContext,
+		buildDocumentLibraryContext(documents),
+	].filter((section): section is string => Boolean(section))
+
+	return { stable, context: contextSections.join('\n\n') }
 }

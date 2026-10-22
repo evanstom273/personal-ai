@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { usePreferencesContext } from '@/providers/ChatProvider'
-import { getConfiguredAiName } from '@/services/gemini/systemInstruction'
+import { getConfiguredAiName } from '@/services/claude/systemInstruction'
 import { HomeActiveProjects } from '@/components/home/HomeActiveProjects'
 import { HomeRecentDocuments } from '@/components/home/HomeRecentDocuments'
 import { HomeTodoSection } from '@/components/home/HomeTodoSection'

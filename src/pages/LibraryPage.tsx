@@ -7,7 +7,6 @@ import {
 	FolderKanban,
 	Image,
 	MoreHorizontal,
-	Music,
 	Pencil,
 	Search,
 	Trash2,
@@ -57,7 +56,6 @@ const LIBRARY_SECTIONS = [
 const DOCUMENT_TABS = [
 	{ id: 'documents', label: 'Docs', icon: FileText },
 	{ id: 'images', label: 'Images', icon: Image },
-	{ id: 'music', label: 'Music', icon: Music },
 ] as const
 
 type DocumentTab = LibraryDocumentTab
@@ -159,13 +157,9 @@ export function LibraryPage() {
 						<DocumentsSection query={query} />
 					) : (
 						<MediaSection
-							kind={activeDocumentTab === 'images' ? 'image' : 'audio'}
+							kind="image"
 							query={query}
-							emptyLabel={
-								activeDocumentTab === 'images'
-									? 'No images yet. Upload one with + in chat or generate an image.'
-									: 'No music yet. Generate music in chat to save it here.'
-							}
+							emptyLabel="No images yet. Images you attach in chat are saved here."
 						/>
 					)}
 				</div>

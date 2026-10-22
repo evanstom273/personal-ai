@@ -1,11 +1,9 @@
-import { geminiFetch } from '@/services/gemini/client'
-import { applySafetySettingsToRequestBody } from '@/services/gemini/safetySettings'
+import { completeText } from '@/services/claude/complete'
 import {
 	buildSystemInstruction,
 	getConfiguredAiName,
 	getConfiguredUserName,
-} from '@/services/gemini/systemInstruction'
-import { MAX_CHAT_OUTPUT_TOKENS } from '@/services/gemini/constants'
+} from '@/services/claude/systemInstruction'
 import type { UserPreferences } from '@/storage/types'
 
 export type DocumentWritingAction =
@@ -18,7 +16,6 @@ export type DocumentWritingAction =
 
 export interface DocumentWritingRequest {
 	apiKey: string
-	modelId: string
 	preferences: UserPreferences
 	documentTitle: string
 	selectedText: string
@@ -26,14 +23,6 @@ export interface DocumentWritingRequest {
 	contextAfter: string
 	action: DocumentWritingAction
 	customInstruction?: string
-}
-
-interface GenerateContentResponse {
-	candidates?: Array<{
-		content?: {
-			parts?: Array<{ text?: string }>
-		}
-	}>
 }
 
 function buildActionInstruction(
@@ -98,42 +87,13 @@ export async function generateDocumentWritingSuggestion(
 		`${getConfiguredAiName(request.preferences)} writing assistant mode: produce direct document text only.`,
 	].join('\n\n')
 
-	const body = applySafetySettingsToRequestBody(
-		{
-			systemInstruction: {
-				parts: [{ text: systemInstruction }],
-			},
-			contents: [
-				{
-					role: 'user',
-					parts: [{ text: buildDocumentWritingPrompt(request) }],
-				},
-			],
-			generationConfig: {
-				temperature: 0.7,
-				maxOutputTokens: MAX_CHAT_OUTPUT_TOKENS,
-			},
-		},
-		request.preferences.allowMatureContent ?? true,
-	)
-
-	const response = await geminiFetch<GenerateContentResponse>(
-		request.apiKey,
-		`/models/${request.modelId}:generateContent`,
-		{
-			method: 'POST',
-			body: JSON.stringify(body),
-		},
-	)
-
-	const text = response.candidates?.[0]?.content?.parts
-		?.map((part) => part.text ?? '')
-		.join('')
-		.trim()
-
-	if (!text) {
-		throw new Error('Gemini returned an empty writing suggestion.')
-	}
+	const text = await completeText({
+		apiKey: request.apiKey,
+		preferences: request.preferences,
+		feature: 'documents',
+		system: systemInstruction,
+		prompt: buildDocumentWritingPrompt(request),
+	})
 
 	return text.replace(/^```[\w]*\n?|\n?```$/g, '').trim()
 }

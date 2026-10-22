@@ -1,5 +1,5 @@
 import type { StoredMessage } from '@/storage/types'
-import { MAX_CHAT_HISTORY_MESSAGES } from '@/services/gemini/constants'
+import { MAX_CHAT_HISTORY_MESSAGES } from '@/services/claude/constants'
 
 export function capMessagesForModelContext(
 	messages: StoredMessage[],

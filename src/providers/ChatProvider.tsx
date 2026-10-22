@@ -3,7 +3,7 @@ import { useReminderFireHandler } from '@/hooks/useReminderFireHandler'
 import { useNativeReminderNotificationHandler } from '@/hooks/useNativeReminderNotificationHandler'
 import { useReminderOsSync } from '@/hooks/useReminderOsSync'
 import { useReminderScheduler } from '@/hooks/useReminderScheduler'
-import { useMainConversation, usePreferences } from '@/hooks/useChatStorage'
+import { useConversations, usePreferences } from '@/hooks/useChatStorage'
 import {
 	shouldAutoPlayAssistantSpeech,
 	useTextToSpeech,
@@ -19,7 +19,7 @@ import {
 import { useLocation } from 'react-router-dom'
 
 type PreferencesContextValue = ReturnType<typeof usePreferences>
-type MainConversationContextValue = ReturnType<typeof useMainConversation>
+type ConversationsContextValue = ReturnType<typeof useConversations>
 type ChatGenerationContextValue = ReturnType<typeof useChatGeneration> & {
 	memoryArchiveError: string | null
 	clearMemoryArchiveError: () => void
@@ -27,8 +27,8 @@ type ChatGenerationContextValue = ReturnType<typeof useChatGeneration> & {
 type TextToSpeechContextValue = ReturnType<typeof useTextToSpeech>
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null)
-const MainConversationContext =
-	createContext<MainConversationContextValue | null>(null)
+const ConversationsContext =
+	createContext<ConversationsContextValue | null>(null)
 const ChatGenerationContext = createContext<ChatGenerationContextValue | null>(
 	null,
 )
@@ -51,9 +51,7 @@ const ChatHeaderSlotContext = createContext<ChatHeaderSlotContextValue | null>(
 
 export function ChatProvider({ children }: { children: ReactNode }) {
 	const preferencesState = usePreferences()
-	const conversationState = useMainConversation(
-		preferencesState.preferences.defaultModelId,
-	)
+	const conversationState = useConversations()
 	const location = useLocation()
 	const textToSpeechState = useTextToSpeech({
 		preferences: preferencesState.preferences,
@@ -112,7 +110,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 		appendMessages: conversationState.appendMessages,
 		truncateMessagesFrom: conversationState.truncateMessagesFrom,
 		ensureConversation: conversationState.ensureConversation,
-		saveConversation: conversationState.saveConversation,
+		setMemoryArchiveCursor: conversationState.setMemoryArchiveCursor,
 		isChatRoute,
 		onAssistantReply: handleAssistantReply,
 		onMemoryArchiveError: handleMemoryArchiveError,
@@ -138,7 +136,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 	return (
 		<PreferencesContext.Provider value={preferencesState}>
-			<MainConversationContext.Provider value={conversationState}>
+			<ConversationsContext.Provider value={conversationState}>
 				<TextToSpeechContext.Provider value={textToSpeechState}>
 					<VoiceSessionContext.Provider value={{ conversationModeActiveRef }}>
 						<ChatHeaderSlotContext.Provider
@@ -156,7 +154,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 						</ChatHeaderSlotContext.Provider>
 					</VoiceSessionContext.Provider>
 				</TextToSpeechContext.Provider>
-			</MainConversationContext.Provider>
+			</ConversationsContext.Provider>
 		</PreferencesContext.Provider>
 	)
 }
@@ -169,11 +167,11 @@ export function usePreferencesContext(): PreferencesContextValue {
 	return context
 }
 
-export function useMainConversationContext(): MainConversationContextValue {
-	const context = useContext(MainConversationContext)
+export function useConversationsContext(): ConversationsContextValue {
+	const context = useContext(ConversationsContext)
 	if (!context) {
 		throw new Error(
-			'useMainConversationContext must be used within ChatProvider',
+			'useConversationsContext must be used within ChatProvider',
 		)
 	}
 	return context

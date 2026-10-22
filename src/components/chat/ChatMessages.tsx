@@ -1,8 +1,10 @@
 import {
+	AlertTriangle,
 	ArrowDown,
 	Bot,
 	ExternalLink,
 	FileText,
+	Globe,
 	Loader2,
 	Music,
 	User,
@@ -15,8 +17,13 @@ import { MessageActions } from '@/components/chat/MessageActions'
 import { MediaLightbox } from '@/components/media/MediaLightbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useFoldablePane } from '@/hooks/useFoldablePane'
-import type { MessageDocumentLink, StoredMessage } from '@/storage/types'
+import type {
+	MessageDocumentLink,
+	MessageWebActivity,
+	StoredMessage,
+} from '@/storage/types'
 import type { TtsPlaybackStatus } from '@/hooks/useTextToSpeech'
+import { formatTokenCount, formatUsd } from '@/services/claude/pricing'
 import { formatMessageTime } from '@/utils/dateTime'
 import { readChatScrollTop, saveChatScrollTop } from '@/utils/chatScrollState'
 import { cn } from '@/utils/cn'
@@ -27,12 +34,17 @@ interface ChatMessagesProps {
 	messages: StoredMessage[]
 	streamingAssistant?: {
 		id: string
+		conversationId: string
 		content: string
+		activity: string | null
 	} | null
 	isGenerating: boolean
 	aiName: string
+	webSearchEnabled?: boolean
 	editingMessageId?: string | null
 	onEditUserMessage?: (message: StoredMessage) => void
+	regenerableMessageId?: string | null
+	onRegenerate?: (message: StoredMessage) => void
 	onConfirmDelete: (
 		messageId: string,
 		documentId: string,
@@ -45,6 +57,8 @@ interface ChatMessagesProps {
 	onStopSpeech?: () => void
 	speechDisabled?: boolean
 	streamingSlot?: ReactNode
+	/** Keeps a separate saved scroll position per conversation. */
+	scrollConversationKey?: string
 }
 
 export function ChatMessages({
@@ -52,8 +66,11 @@ export function ChatMessages({
 	streamingAssistant,
 	isGenerating,
 	aiName,
+	webSearchEnabled = true,
 	editingMessageId = null,
 	onEditUserMessage,
+	regenerableMessageId = null,
+	onRegenerate,
 	onConfirmDelete,
 	onCancelDelete,
 	activeSpeechMessageId = null,
@@ -62,11 +79,13 @@ export function ChatMessages({
 	onStopSpeech,
 	speechDisabled = false,
 	streamingSlot,
+	scrollConversationKey = 'default',
 }: ChatMessagesProps) {
 	const viewportRef = useRef<HTMLDivElement>(null)
 	const previousMessageCountRef = useRef(messages.length)
 	const hasRestoredScrollRef = useRef(false)
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+	const scrollKey = scrollConversationKey
 
 	const isNearBottom = useCallback((viewport: HTMLElement): boolean => {
 		return (
@@ -95,10 +114,10 @@ export function ChatMessages({
 				top: viewport.scrollHeight,
 				behavior,
 			})
-			saveChatScrollTop(viewport.scrollHeight)
+			saveChatScrollTop(viewport.scrollHeight, scrollKey)
 			setShowScrollToBottom(false)
 		},
-		[],
+		[scrollKey],
 	)
 
 	useLayoutEffect(() => {
@@ -111,7 +130,7 @@ export function ChatMessages({
 			return
 		}
 
-		const savedScrollTop = readChatScrollTop()
+		const savedScrollTop = readChatScrollTop(scrollKey)
 		if (savedScrollTop !== null) {
 			viewport.scrollTop = savedScrollTop
 			updateScrollButtonVisibility()
@@ -128,6 +147,7 @@ export function ChatMessages({
 	}, [
 		isGenerating,
 		messages.length,
+		scrollKey,
 		streamingAssistant,
 		updateScrollButtonVisibility,
 	])
@@ -139,7 +159,7 @@ export function ChatMessages({
 		}
 
 		function handleScroll(): void {
-			saveChatScrollTop(viewport!.scrollTop)
+			saveChatScrollTop(viewport!.scrollTop, scrollKey)
 			updateScrollButtonVisibility()
 		}
 
@@ -147,16 +167,16 @@ export function ChatMessages({
 		return () => {
 			viewport.removeEventListener('scroll', handleScroll)
 		}
-	}, [updateScrollButtonVisibility])
+	}, [scrollKey, updateScrollButtonVisibility])
 
 	useEffect(() => {
 		return () => {
 			const viewport = viewportRef.current
 			if (viewport) {
-				saveChatScrollTop(viewport.scrollTop)
+				saveChatScrollTop(viewport.scrollTop, scrollKey)
 			}
 		}
-	}, [])
+	}, [scrollKey])
 
 	useEffect(() => {
 		if (messages.length <= previousMessageCountRef.current) {
@@ -183,11 +203,11 @@ export function ChatMessages({
 					<div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
 						<Bot className="h-7 w-7" />
 					</div>
-					<h2 className="text-lg font-semibold">Your conversation</h2>
+					<h2 className="text-lg font-semibold">New conversation</h2>
 					<p className="text-sm text-muted-foreground">
-						One continuous thread with {aiName}. Switch between Gemini 3.6
-						Flash and 3.1 Pro, ask for document help, or try phrases like
-						&quot;generate an image of…&quot; or &quot;generate music&quot;.
+						Chat with {aiName}. Attach images, PDFs, or code, ask for help with
+						your documents, projects, and reminders
+						{webSearchEnabled ? ', or ask about anything current — web search is on' : ''}.
 					</p>
 				</div>
 			</div>
@@ -206,6 +226,11 @@ export function ChatMessages({
 							isEditing={editingMessageId === message.id}
 							onEditUserMessage={onEditUserMessage}
 							editDisabled={isGenerating}
+							onRegenerate={
+								onRegenerate && message.id === regenerableMessageId
+									? () => onRegenerate(message)
+									: undefined
+							}
 							onConfirmDelete={onConfirmDelete}
 							onCancelDelete={onCancelDelete}
 							activeSpeechMessageId={activeSpeechMessageId}
@@ -227,6 +252,7 @@ export function ChatMessages({
 							onConfirmDelete={onConfirmDelete}
 							onCancelDelete={onCancelDelete}
 							isStreaming
+							streamingActivity={streamingAssistant.activity}
 							streamingSlot={streamingSlot}
 						/>
 					) : null}
@@ -271,11 +297,15 @@ function MessageRow({
 	onStopSpeech,
 	speechDisabled = false,
 	isStreaming = false,
+	streamingActivity = null,
 	streamingSlot,
+	onRegenerate,
 }: {
 	message: StoredMessage
 	aiName: string
 	onEditUserMessage?: (message: StoredMessage) => void
+	onRegenerate?: () => void
+	streamingActivity?: string | null
 	editDisabled?: boolean
 	isEditing?: boolean
 	onConfirmDelete: ChatMessagesProps['onConfirmDelete']
@@ -371,13 +401,33 @@ function MessageRow({
 								</div>
 							) : message.content ? (
 								<ChatMarkdown content={message.content} />
-							) : isStreaming ? (
-								<span className="inline-flex items-center gap-2 text-muted-foreground">
+							) : null}
+							{isStreaming && (streamingActivity || !message.content) ? (
+								<span
+									className={cn(
+										'inline-flex items-center gap-2 text-sm text-muted-foreground',
+										message.content && 'mt-3',
+									)}
+								>
 									<Loader2 className="h-4 w-4 animate-spin" />
-									Thinking…
+									{streamingActivity ?? 'Thinking…'}
 								</span>
 							) : null}
 						</div>
+
+						{isUser && message.attachments?.length ? (
+							<div className="mt-3 flex flex-wrap justify-end gap-2">
+								{message.attachments.map((file, index) => (
+									<span
+										key={`${message.id}-file-${index}`}
+										className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-background/60 px-2.5 py-1 text-xs ring-1 ring-border/60"
+									>
+										<FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+										<span className="truncate">{file.name}</span>
+									</span>
+								))}
+							</div>
+						) : null}
 
 						{!showMediaFirst
 							? message.media
@@ -393,6 +443,15 @@ function MessageRow({
 									/>
 								))
 							: null}
+
+						{!isUser && message.web ? <WebActivityFooter web={message.web} /> : null}
+
+						{message.stopNote ? (
+							<p className="mt-3 flex items-start gap-1.5 text-xs text-muted-foreground">
+								<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+								{message.stopNote}
+							</p>
+						) : null}
 
 						{message.documentLinks?.map((link) => (
 							<DocumentLinkCard
@@ -452,6 +511,10 @@ function MessageRow({
 							onStopSpeak={onStopSpeech}
 							speakStatus={messageSpeechStatus}
 							speakDisabled={speechDisabled}
+							onRegenerate={onRegenerate}
+							regenerateDisabled={editDisabled}
+							costLabel={message.usage ? formatUsd(message.usage.costUsd) : undefined}
+							costTitle={message.usage ? describeUsage(message.usage) : undefined}
 						/>
 					) : null}
 				</div>
@@ -553,6 +616,79 @@ function MediaPreview({
 					<audio controls src={media.dataUrl} className="w-full max-w-full" />
 				)}
 			</div>
+		</div>
+	)
+}
+
+function describeUsage(usage: NonNullable<StoredMessage['usage']>): string {
+	const parts = [
+		`${formatTokenCount(usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens)} input tokens`,
+		usage.cacheReadTokens > 0 ? `${formatTokenCount(usage.cacheReadTokens)} from cache` : null,
+		`${formatTokenCount(usage.outputTokens)} output tokens`,
+		usage.webSearches > 0
+			? `${usage.webSearches} web search${usage.webSearches === 1 ? '' : 'es'}`
+			: null,
+		usage.requests > 1 ? `${usage.requests} API requests` : null,
+	].filter(Boolean)
+	return `Estimated cost: ${parts.join(' · ')}`
+}
+
+function hostnameOf(url: string): string {
+	try {
+		return new URL(url).hostname.replace(/^www\./, '')
+	} catch {
+		return url
+	}
+}
+
+function WebActivityFooter({ web }: { web: MessageWebActivity }) {
+	const searchCount = web.searchQueries.length
+	const pageCount = web.fetchedUrls.length
+	const summary = [
+		searchCount > 0
+			? `Searched the web for ${web.searchQueries.map((query) => `“${query}”`).join(', ')}`
+			: null,
+		pageCount > 0 ? `read ${pageCount} page${pageCount === 1 ? '' : 's'}` : null,
+	]
+		.filter(Boolean)
+		.join(' · ')
+
+	return (
+		<div className="mt-4 rounded-xl border border-border/70 bg-secondary/30 px-3 py-2.5 text-xs">
+			{summary ? (
+				<p className="flex items-start gap-1.5 text-muted-foreground">
+					<Globe className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+					<span>{summary}</span>
+				</p>
+			) : null}
+			{web.sources.length > 0 ? (
+				<>
+					<p className={cn('font-medium text-foreground', summary && 'mt-2')}>Sources</p>
+					<ol className="mt-1 space-y-1">
+						{web.sources.map((source, index) => (
+							<li key={source.url} className="flex min-w-0 gap-1.5">
+								<span className="shrink-0 text-muted-foreground">{index + 1}.</span>
+								<a
+									href={source.url}
+									target="_blank"
+									rel="noopener noreferrer"
+									className="min-w-0 truncate text-primary underline-offset-4 hover:underline"
+									title={source.url}
+								>
+									{source.title}
+									<span className="text-muted-foreground"> — {hostnameOf(source.url)}</span>
+								</a>
+							</li>
+						))}
+					</ol>
+				</>
+			) : null}
+			{web.failures.length > 0 ? (
+				<p className="mt-2 flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
+					<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+					<span>Some web lookups failed: {web.failures.join('; ')}.</span>
+				</p>
+			) : null}
 		</div>
 	)
 }

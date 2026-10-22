@@ -340,3 +340,12 @@ function shouldContinueParagraph(previous: string, next: string): boolean {
 
 	return /^[a-z("'(]/.test(trimmedNext)
 }
+
+/** Page count without extracting text — used to decide whether a PDF can be sent to Claude directly. */
+export async function getPdfPageCount(file: File): Promise<number> {
+	const buffer = await file.arrayBuffer()
+	const document = await getDocument({ data: buffer }).promise
+	const count = document.numPages
+	void document.destroy()
+	return count
+}

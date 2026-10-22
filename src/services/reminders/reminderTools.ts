@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import {
 	buildReminderCreateInputFromToolArgs,
 	createReminder,
@@ -21,15 +22,15 @@ export const REMINDER_TOOL_DECLARATIONS = [
 		name: 'list_reminders',
 		description:
 			'List reminders and scheduled items stored in the app. Optionally filter by title search.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				query: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional case-insensitive title search filter.',
 				},
 				include_disabled: {
-					type: 'BOOLEAN',
+					type: 'boolean',
 					description: 'When true, include disabled or completed one-shot reminders.',
 				},
 			},
@@ -39,25 +40,25 @@ export const REMINDER_TOOL_DECLARATIONS = [
 		name: 'create_reminder',
 		description:
 			'Create a reminder or scheduled notification. Use the current date and time from system instructions to pick a valid future scheduled_at_iso.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				title: { type: 'STRING', description: 'Short reminder title.' },
+				title: { type: 'string', description: 'Short reminder title.' },
 				scheduled_at_iso: {
-					type: 'STRING',
+					type: 'string',
 					description:
 						'When the reminder should fire, as ISO 8601 (e.g. 2026-08-11T09:00:00). Use local time unless an offset is required.',
 				},
 				recurrence: {
-					type: 'STRING',
+					type: 'string',
 					description: 'One of: none, daily, weekly, monthly, yearly.',
 				},
 				note: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional extra context shown with the reminder.',
 				},
 				delivery_message: {
-					type: 'STRING',
+					type: 'string',
 					description:
 						'Optional assistant chat message to send when the reminder fires. Write it in your voice.',
 				},
@@ -68,32 +69,32 @@ export const REMINDER_TOOL_DECLARATIONS = [
 	{
 		name: 'update_reminder',
 		description: 'Update an existing reminder by id or title.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				reminder_id: { type: 'STRING' },
-				title: { type: 'STRING', description: 'Current title if id is unknown.' },
-				new_title: { type: 'STRING' },
-				scheduled_at_iso: { type: 'STRING' },
-				recurrence: { type: 'STRING' },
-				note: { type: 'STRING' },
-				delivery_message: { type: 'STRING' },
-				enabled: { type: 'BOOLEAN' },
+				reminder_id: { type: 'string' },
+				title: { type: 'string', description: 'Current title if id is unknown.' },
+				new_title: { type: 'string' },
+				scheduled_at_iso: { type: 'string' },
+				recurrence: { type: 'string' },
+				note: { type: 'string' },
+				delivery_message: { type: 'string' },
+				enabled: { type: 'boolean' },
 			},
 		},
 	},
 	{
 		name: 'delete_reminder',
 		description: 'Delete a reminder by id or title.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
-				reminder_id: { type: 'STRING' },
-				title: { type: 'STRING', description: 'Exact or partial title if id is unknown.' },
+				reminder_id: { type: 'string' },
+				title: { type: 'string', description: 'Exact or partial title if id is unknown.' },
 			},
 		},
 	},
-] as const
+] satisfies Anthropic.Tool[]
 
 export async function executeReminderToolCall(
 	name: string,

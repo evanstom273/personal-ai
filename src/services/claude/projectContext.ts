@@ -1,7 +1,7 @@
 import { listProjects } from '@/services/projects/projectService'
 import type { ProjectRecord } from '@/storage/types'
 
-const MAX_TOTAL_PROJECT_CONTEXT_CHARS = 24_000
+const MAX_TOTAL_PROJECT_CONTEXT_CHARS = 12_000
 
 function formatTaskLine(task: ProjectRecord['tasks'][number]): string {
 	const checklist =
@@ -36,6 +36,11 @@ function formatProjectForContext(project: ProjectRecord): string {
 			const tasks = tasksByStatus[status]
 			if (tasks.length === 0) {
 				return `#### ${status}\n(none)`
+			}
+
+			if (status === 'done') {
+				// Finished work only needs titles; get_project returns full detail.
+				return `#### done\n${tasks.map((task) => `- ${task.title} (id: ${task.id})`).join('\n')}`
 			}
 
 			return `#### ${status}\n${tasks.map(formatTaskLine).join('\n')}`

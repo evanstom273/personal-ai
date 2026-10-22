@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk'
 import {
 	SOURCE_CODE_INDEX,
 	SOURCE_CODE_PATHS,
@@ -18,13 +19,13 @@ export const CODEBASE_TOOL_DECLARATIONS = [
 		name: 'list_source_files',
 		description:
 			'List bundled read-only source files from the app codebase. Use when the user asks how the app is built or wants to explore implementation files.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				path_prefix: {
-					type: 'STRING',
+					type: 'string',
 					description:
-						'Optional path prefix filter, e.g. "src/services/gemini/" or "src/pages/".',
+						'Optional path prefix filter, e.g. "src/services/claude/" or "src/pages/".',
 				},
 			},
 		},
@@ -33,13 +34,13 @@ export const CODEBASE_TOOL_DECLARATIONS = [
 		name: 'read_source_file',
 		description:
 			'Read the full text of one bundled source file by path. Read-only — cannot modify code.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				path: {
-					type: 'STRING',
+					type: 'string',
 					description:
-						'Exact file path from list_source_files, e.g. "src/services/gemini/chatWithTools.ts".',
+						'Exact file path from list_source_files, e.g. "src/services/claude/chatWithTools.ts".',
 				},
 			},
 			required: ['path'],
@@ -49,26 +50,26 @@ export const CODEBASE_TOOL_DECLARATIONS = [
 		name: 'search_source_code',
 		description:
 			'Search bundled source files for a string or regex pattern. Returns matching lines with file paths and line numbers.',
-		parameters: {
-			type: 'OBJECT',
+		input_schema: {
+			type: 'object',
 			properties: {
 				query: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Text or regex pattern to search for.',
 				},
 				path_prefix: {
-					type: 'STRING',
+					type: 'string',
 					description: 'Optional path prefix to limit search scope.',
 				},
 				case_sensitive: {
-					type: 'BOOLEAN',
+					type: 'boolean',
 					description: 'Whether the search is case-sensitive. Defaults to false.',
 				},
 			},
 			required: ['query'],
 		},
 	},
-] as const
+] satisfies Anthropic.Tool[]
 
 const CODEBASE_TOOL_NAMES = new Set<string>(
 	CODEBASE_TOOL_DECLARATIONS.map((tool) => tool.name),

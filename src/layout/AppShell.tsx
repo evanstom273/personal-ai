@@ -15,12 +15,11 @@ import { BottomNav } from '@/layout/BottomNav'
 import {
 	useChatGenerationContext,
 	useChatHeaderSlot,
-	useMainConversationContext,
+	useConversationsContext,
 	usePreferencesContext,
 	useTextToSpeechContext,
 } from '@/providers/ChatProvider'
-import { getConfiguredAiName } from '@/services/gemini/systemInstruction'
-import { hasGeminiApiKey } from '@/storage/geminiApiKeys'
+import { getConfiguredAiName } from '@/services/claude/systemInstruction'
 import { cn } from '@/utils/cn'
 
 function getPageTitle(pathname: string, aiName: string): string {
@@ -57,9 +56,8 @@ function getPageTitle(pathname: string, aiName: string): string {
 
 export function AppShell() {
 	const { preferences } = usePreferencesContext()
-	const { conversation, clearConversation, replaceConversation } =
-		useMainConversationContext()
-	const { isGenerating, completionNotice, clearCompletionNotice, stopGeneration, submitMessage } =
+	const { conversation } = useConversationsContext()
+	const { isGenerating, completionNotice, clearCompletionNotice, submitMessage } =
 		useChatGenerationContext()
 	const {
 		status: speechStatus,
@@ -84,18 +82,6 @@ export function AppShell() {
 		!(isChatRoute && !isMobileNav)
 
 	useAppSwipeNavigation(navigateWithFade)
-
-	const handleClearChat = useCallback(async () => {
-		stopGeneration()
-		await clearConversation()
-	}, [clearConversation, stopGeneration])
-
-	const handleImportChat = useCallback(
-		async (imported: Parameters<typeof replaceConversation>[0]) => {
-			await replaceConversation(imported)
-		},
-		[replaceConversation],
-	)
 
 	const handleVoiceSubmit = useCallback(
 		async (payload: Parameters<typeof submitMessage>[0]) => {
@@ -123,6 +109,7 @@ export function AppShell() {
 							</h1>
 							{isChatRoute ? (
 								<p className="truncate text-xs text-muted-foreground">
+									{conversation?.title ? `${conversation.title} · ` : ''}
 									{formatAppVersionLabel()}
 								</p>
 							) : isGenerating ? (
@@ -134,12 +121,7 @@ export function AppShell() {
 						{isChatRoute ? (
 							<div className="flex shrink-0 items-center gap-0.5">
 								{chatHeaderVoiceSlot}
-								<ChatConversationActions
-									conversation={conversation}
-									isGenerating={isGenerating}
-									onClear={handleClearChat}
-									onImport={handleImportChat}
-								/>
+								<ChatConversationActions />
 							</div>
 						) : null}
 					</div>
@@ -196,10 +178,9 @@ export function AppShell() {
 			</main>
 
 			<ChatVoiceSession
-				preferences={preferences}
 				conversationMessages={conversation?.messages ?? []}
 				isGenerating={isGenerating}
-				hasApiKey={hasGeminiApiKey(preferences)}
+				hasApiKey={preferences.anthropicApiKey.trim().length > 0}
 				aiName={aiName}
 				speechStatus={speechStatus}
 				onSubmit={handleVoiceSubmit}

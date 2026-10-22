@@ -1,27 +1,26 @@
-import type { ChatInputMethod } from '@/storage/types'
+import type { ChatInputMethod, MessageFileAttachment } from '@/storage/types'
 
 export type ChatAttachment =
 	| {
 			id: string
 			type: 'document'
 			name: string
+			/** Library copy, when the file could be saved as a document. */
 			documentId?: string
-			dataUrl?: string
-			mimeType?: string
+			/** Sent to Claude directly (PDF pages or text) when within size limits. */
+			file?: MessageFileAttachment
 	  }
 	| {
 			id: string
 			type: 'image'
 			name: string
-			documentId?: string
-			dataUrl?: string
-			mimeType?: string
+			dataUrl: string
+			mimeType: string
 	  }
 
 export interface ChatSubmitPayload {
 	text: string
 	attachments: ChatAttachment[]
-	webSearchEnabled: boolean
 	inputMethod: ChatInputMethod
 	editFromMessageId?: string
 }

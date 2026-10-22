@@ -1,4 +1,4 @@
-import { Check, Copy, Loader2, Pencil, Square, TextSelect, Volume2 } from 'lucide-react'
+import { Check, Copy, Loader2, Pencil, RefreshCw, Square, TextSelect, Volume2 } from 'lucide-react'
 import { useCallback, useState, type RefObject } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/utils/cn'
@@ -13,6 +13,11 @@ interface MessageActionsProps {
 	onStopSpeak?: () => void
 	speakStatus?: 'idle' | 'loading' | 'playing'
 	speakDisabled?: boolean
+	onRegenerate?: () => void
+	regenerateDisabled?: boolean
+	/** Estimated cost of this reply, shown quietly at the end of the row. */
+	costLabel?: string
+	costTitle?: string
 }
 
 export function MessageActions({
@@ -25,6 +30,10 @@ export function MessageActions({
 	onStopSpeak,
 	speakStatus = 'idle',
 	speakDisabled = false,
+	onRegenerate,
+	regenerateDisabled = false,
+	costLabel,
+	costTitle,
 }: MessageActionsProps) {
 	const [copied, setCopied] = useState(false)
 
@@ -56,7 +65,7 @@ export function MessageActions({
 	const isLoadingSpeech = speakStatus === 'loading'
 
 	return (
-		<div className={cn('flex items-center gap-1', className)}>
+		<div className={cn('flex flex-wrap items-center gap-1', className)}>
 			{onEdit ? (
 				<Button
 					type="button"
@@ -131,6 +140,28 @@ export function MessageActions({
 				<TextSelect className="h-3.5 w-3.5" />
 				Select
 			</Button>
+			{onRegenerate ? (
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+					disabled={regenerateDisabled}
+					onClick={onRegenerate}
+					aria-label="Regenerate reply"
+				>
+					<RefreshCw className="h-3.5 w-3.5" />
+					Regenerate
+				</Button>
+			) : null}
+			{costLabel ? (
+				<span
+					className="px-1.5 text-[11px] tabular-nums text-muted-foreground/70"
+					title={costTitle}
+				>
+					{costLabel}
+				</span>
+			) : null}
 		</div>
 	)
 }

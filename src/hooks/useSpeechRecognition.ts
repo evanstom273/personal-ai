@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { transcribeAudioWithGemini } from '@/services/gemini/transcribeAudio'
 import {
 	getAndroidSpeechHelpMessage,
-	getRecorderSpeechHint,
 	getSpeechRecognitionConstructor,
 	getSpeechRecognitionErrorMessage,
 	getSpeechRecognitionProfile,
@@ -10,15 +8,12 @@ import {
 	isVoiceInputSupported,
 	openMicrophoneStream,
 	releaseMicrophoneStream,
-	shouldUseRecorderTranscription,
 } from '@/utils/speechRecognition'
 
 export type SpeechRecognitionStatus = 'idle' | 'listening' | 'transcribing' | 'review'
 
 interface UseSpeechRecognitionOptions {
 	onTranscriptChange?: (transcript: string) => void
-	geminiApiKey?: string
-	transcriptionModelId?: string
 }
 
 interface UseSpeechRecognitionResult {
@@ -35,9 +30,7 @@ interface UseSpeechRecognitionResult {
 export function useSpeechRecognition(
 	options: UseSpeechRecognitionOptions = {},
 ): UseSpeechRecognitionResult {
-	const { onTranscriptChange, geminiApiKey = '', transcriptionModelId = '' } =
-		options
-	const useRecorder = shouldUseRecorderTranscription()
+	const { onTranscriptChange } = options
 	const profile = getSpeechRecognitionProfile()
 	const [isSupported] = useState(isVoiceInputSupported)
 	const [status, setStatus] = useState<SpeechRecognitionStatus>('idle')
@@ -47,8 +40,6 @@ export function useSpeechRecognition(
 
 	const recognitionRef = useRef<SpeechRecognition | null>(null)
 	const micStreamRef = useRef<MediaStream | null>(null)
-	const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-	const audioChunksRef = useRef<Blob[]>([])
 	const committedRef = useRef('')
 	const baseTextRef = useRef('')
 	const statusRef = useRef<SpeechRecognitionStatus>('idle')
@@ -92,37 +83,6 @@ export function useSpeechRecognition(
 		}
 	}, [clearRestartTimeout])
 
-	const stopRecorder = useCallback(async (): Promise<Blob | null> => {
-		const recorder = mediaRecorderRef.current
-		mediaRecorderRef.current = null
-
-		if (!recorder || recorder.state === 'inactive') {
-			const chunks = audioChunksRef.current
-			audioChunksRef.current = []
-			return chunks.length > 0
-				? new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
-				: null
-		}
-
-		return new Promise((resolve) => {
-			recorder.onstop = () => {
-				const chunks = audioChunksRef.current
-				audioChunksRef.current = []
-				resolve(
-					chunks.length > 0
-						? new Blob(chunks, { type: chunks[0]?.type || recorder.mimeType || 'audio/webm' })
-						: null,
-				)
-			}
-
-			try {
-				recorder.stop()
-			} catch {
-				resolve(null)
-			}
-		})
-	}, [])
-
 	const resetSessionState = useCallback(() => {
 		silentRestartCountRef.current = 0
 		sessionHadResultRef.current = false
@@ -131,7 +91,6 @@ export function useSpeechRecognition(
 
 	const cancelListening = useCallback(() => {
 		stopRecognition()
-		void stopRecorder()
 		releaseMicrophone()
 		committedRef.current = ''
 		baseTextRef.current = ''
@@ -140,7 +99,7 @@ export function useSpeechRecognition(
 		setError(null)
 		setStatus('idle')
 		updateTranscript('')
-	}, [releaseMicrophone, resetSessionState, stopRecognition, stopRecorder, updateTranscript])
+	}, [releaseMicrophone, resetSessionState, stopRecognition, updateTranscript])
 
 	const bindRecognition = useCallback(
 		(recognition: SpeechRecognition, restart: () => void) => {
@@ -335,148 +294,29 @@ export function useSpeechRecognition(
 		],
 	)
 
-	const startRecorderListening = useCallback(
-		async (trimmedBase: string) => {
-			if (!geminiApiKey.trim()) {
-				setError('Add your Gemini API key in Settings to use voice input.')
-				setStatus('idle')
-				return
-			}
-
-			const microphone = await openMicrophoneStream()
-			if (!microphone.ok) {
-				setError(microphone.message)
-				setStatus('idle')
-				return
-			}
-
-			releaseMicrophone()
-			micStreamRef.current = microphone.stream
-			audioChunksRef.current = []
-
-			let recorder: MediaRecorder
-			try {
-				recorder = new MediaRecorder(microphone.stream)
-			} catch {
-				releaseMicrophone()
-				setError('Could not start audio recording on this device.')
-				setStatus('idle')
-				return
-			}
-
-			recorder.ondataavailable = (event) => {
-				if (event.data.size > 0) {
-					audioChunksRef.current.push(event.data)
-				}
-			}
-
-			mediaRecorderRef.current = recorder
-			committedRef.current = trimmedBase
-			resetSessionState()
-			updateTranscript(trimmedBase)
-			setError(null)
-			setHint(getRecorderSpeechHint())
-			setStatus('listening')
-
-			try {
-				recorder.start(250)
-			} catch {
-				mediaRecorderRef.current = null
-				releaseMicrophone()
-				setError('Could not start audio recording on this device.')
-				setStatus('idle')
-			}
-		},
-		[
-			geminiApiKey,
-			releaseMicrophone,
-			resetSessionState,
-			updateTranscript,
-		],
-	)
-
 	const startListening = useCallback(
 		async (baseText = '') => {
 			const trimmedBase = baseText.trim()
 			baseTextRef.current = trimmedBase
-
-			if (useRecorder) {
-				await startRecorderListening(trimmedBase)
-				return
-			}
-
 			await startWebSpeechListening(trimmedBase)
 		},
-		[startRecorderListening, startWebSpeechListening, useRecorder],
+		[startWebSpeechListening],
 	)
 
 	const continueListening = useCallback(async (): Promise<string> => {
-		if (useRecorder) {
-			if (statusRef.current !== 'listening') {
-				return transcript
-			}
-
-			setStatus('transcribing')
-			setHint('Transcribing…')
-			setError(null)
-
-			const audioBlob = await stopRecorder()
-			releaseMicrophone()
-
-			if (!audioBlob) {
-				setError('No audio was recorded. Try speaking again.')
-				setHint(null)
-				setStatus('review')
-				return committedRef.current.trim()
-			}
-
-			try {
-				const spoken = await transcribeAudioWithGemini(
-					geminiApiKey,
-					transcriptionModelId,
-					audioBlob,
-				)
-				const merged = joinTranscriptParts(committedRef.current, spoken)
-				committedRef.current = merged
-				updateTranscript(merged)
-				setHint(null)
-				setStatus('review')
-				return merged
-			} catch (transcriptionError) {
-				setError(
-					transcriptionError instanceof Error
-						? transcriptionError.message
-						: 'Transcription failed.',
-				)
-				setHint(getAndroidSpeechHelpMessage())
-				setStatus('review')
-				return committedRef.current.trim()
-			}
-		}
-
 		stopRecognition()
 		releaseMicrophone()
 		setHint(null)
 		setStatus('review')
 		return committedRef.current.trim()
-	}, [
-		geminiApiKey,
-		releaseMicrophone,
-		stopRecognition,
-		stopRecorder,
-		transcript,
-		transcriptionModelId,
-		updateTranscript,
-		useRecorder,
-	])
+	}, [releaseMicrophone, stopRecognition])
 
 	useEffect(() => {
 		return () => {
 			stopRecognition()
-			void stopRecorder()
 			releaseMicrophone()
 		}
-	}, [releaseMicrophone, stopRecognition, stopRecorder])
+	}, [releaseMicrophone, stopRecognition])
 
 	return {
 		isSupported,

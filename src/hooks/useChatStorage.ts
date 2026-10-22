@@ -62,6 +62,14 @@ function normalizePreferences(stored: StoredPreferences | undefined): UserPrefer
 			typeof cleaned.spendWarningsEnabled === 'boolean'
 				? cleaned.spendWarningsEnabled
 				: DEFAULT_PREFERENCES.spendWarningsEnabled,
+		cloudflareAccountId:
+			typeof cleaned.cloudflareAccountId === 'string' ? cleaned.cloudflareAccountId : '',
+		cloudflareApiToken:
+			typeof cleaned.cloudflareApiToken === 'string' ? cleaned.cloudflareApiToken : '',
+		cfImageGeneration: cleaned.cfImageGeneration !== false,
+		cfTranscription: cleaned.cfTranscription !== false,
+		cfSemanticMemory: cleaned.cfSemanticMemory !== false,
+		ttsEngine: cleaned.ttsEngine === 'cloudflare' ? 'cloudflare' : 'device',
 		memoryArchiveInterval: normalizeMemoryArchiveInterval(
 			cleaned.memoryArchiveInterval,
 		),

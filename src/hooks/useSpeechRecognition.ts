@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Transcriber } from '@/hooks/useCloudflareTranscriber'
+import { startAudioRecording, type ActiveRecording } from '@/utils/audioRecorder'
 import {
 	getAndroidSpeechHelpMessage,
 	getSpeechRecognitionConstructor,
@@ -14,6 +16,8 @@ export type SpeechRecognitionStatus = 'idle' | 'listening' | 'transcribing' | 'r
 
 interface UseSpeechRecognitionOptions {
 	onTranscriptChange?: (transcript: string) => void
+	/** When set, record a clip and transcribe it (Cloudflare Whisper) instead of browser recognition. */
+	transcribe?: Transcriber | null
 }
 
 interface UseSpeechRecognitionResult {
@@ -30,9 +34,11 @@ interface UseSpeechRecognitionResult {
 export function useSpeechRecognition(
 	options: UseSpeechRecognitionOptions = {},
 ): UseSpeechRecognitionResult {
-	const { onTranscriptChange } = options
+	const { onTranscriptChange, transcribe = null } = options
 	const profile = getSpeechRecognitionProfile()
-	const [isSupported] = useState(isVoiceInputSupported)
+	const [browserRecognitionSupported] = useState(isVoiceInputSupported)
+	const isSupported = Boolean(transcribe) || browserRecognitionSupported
+	const recordingRef = useRef<ActiveRecording | null>(null)
 	const [status, setStatus] = useState<SpeechRecognitionStatus>('idle')
 	const [transcript, setTranscript] = useState('')
 	const [error, setError] = useState<string | null>(null)
@@ -91,6 +97,8 @@ export function useSpeechRecognition(
 
 	const cancelListening = useCallback(() => {
 		stopRecognition()
+		recordingRef.current?.cancel()
+		recordingRef.current = null
 		releaseMicrophone()
 		committedRef.current = ''
 		baseTextRef.current = ''
@@ -294,26 +302,96 @@ export function useSpeechRecognition(
 		],
 	)
 
+	const startRecorderListening = useCallback(
+		async (trimmedBase: string) => {
+			const microphone = await openMicrophoneStream()
+			if (!microphone.ok) {
+				setError(microphone.message)
+				setStatus('idle')
+				return
+			}
+
+			releaseMicrophone()
+			micStreamRef.current = microphone.stream
+			try {
+				recordingRef.current = startAudioRecording(microphone.stream)
+			} catch {
+				releaseMicrophone()
+				setError('Could not start audio recording on this device.')
+				setStatus('idle')
+				return
+			}
+
+			committedRef.current = trimmedBase
+			updateTranscript(trimmedBase)
+			setError(null)
+			setHint('Recording… speak now, then tap Continue to transcribe.')
+			setStatus('listening')
+		},
+		[releaseMicrophone, updateTranscript],
+	)
+
 	const startListening = useCallback(
 		async (baseText = '') => {
 			const trimmedBase = baseText.trim()
 			baseTextRef.current = trimmedBase
+			if (transcribe) {
+				await startRecorderListening(trimmedBase)
+				return
+			}
 			await startWebSpeechListening(trimmedBase)
 		},
-		[startWebSpeechListening],
+		[startRecorderListening, startWebSpeechListening, transcribe],
 	)
 
 	const continueListening = useCallback(async (): Promise<string> => {
+		if (transcribe && recordingRef.current) {
+			const recording = recordingRef.current
+			recordingRef.current = null
+			setStatus('transcribing')
+			setHint('Transcribing…')
+			setError(null)
+			const audio = await recording.stop()
+			releaseMicrophone()
+
+			if (!audio) {
+				setError('No audio was recorded. Try speaking again.')
+				setHint(null)
+				setStatus('review')
+				return committedRef.current.trim()
+			}
+
+			try {
+				const spoken = await transcribe(audio.blob, audio.durationMs)
+				const merged = joinTranscriptParts(committedRef.current, spoken)
+				committedRef.current = merged
+				updateTranscript(merged)
+				setHint(null)
+				setStatus('review')
+				return merged
+			} catch (transcriptionError) {
+				setError(
+					transcriptionError instanceof Error
+						? transcriptionError.message
+						: 'Transcription failed.',
+				)
+				setHint(null)
+				setStatus('review')
+				return committedRef.current.trim()
+			}
+		}
+
 		stopRecognition()
 		releaseMicrophone()
 		setHint(null)
 		setStatus('review')
 		return committedRef.current.trim()
-	}, [releaseMicrophone, stopRecognition])
+	}, [releaseMicrophone, stopRecognition, transcribe, updateTranscript])
 
 	useEffect(() => {
 		return () => {
 			stopRecognition()
+			recordingRef.current?.cancel()
 			releaseMicrophone()
 		}
 	}, [releaseMicrophone, stopRecognition])

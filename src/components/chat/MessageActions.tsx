@@ -1,4 +1,4 @@
-import { Check, Copy, Loader2, Pencil, RefreshCw, Square, TextSelect, Volume2 } from 'lucide-react'
+import { Check, Copy, Loader2, Pause, Pencil, Play, RefreshCw, Square, TextSelect, Volume2 } from 'lucide-react'
 import { useCallback, useState, type RefObject } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/utils/cn'
@@ -11,7 +11,9 @@ interface MessageActionsProps {
 	editDisabled?: boolean
 	onSpeak?: () => void
 	onStopSpeak?: () => void
-	speakStatus?: 'idle' | 'loading' | 'playing'
+	speakStatus?: 'idle' | 'loading' | 'playing' | 'paused'
+	onPauseSpeak?: () => void
+	onResumeSpeak?: () => void
 	speakDisabled?: boolean
 	onRegenerate?: () => void
 	regenerateDisabled?: boolean
@@ -30,6 +32,8 @@ export function MessageActions({
 	onStopSpeak,
 	speakStatus = 'idle',
 	speakDisabled = false,
+	onPauseSpeak,
+	onResumeSpeak,
 	onRegenerate,
 	regenerateDisabled = false,
 	costLabel,
@@ -61,7 +65,8 @@ export function MessageActions({
 		element.focus({ preventScroll: true })
 	}, [contentRef])
 
-	const isSpeaking = speakStatus === 'playing'
+	const isPaused = speakStatus === 'paused'
+	const isSpeaking = speakStatus === 'playing' || isPaused
 	const isLoadingSpeech = speakStatus === 'loading'
 
 	return (
@@ -110,6 +115,19 @@ export function MessageActions({
 						<Volume2 className="h-3.5 w-3.5" />
 					)}
 					{isLoadingSpeech ? 'Loading' : isSpeaking ? 'Stop' : 'Listen'}
+				</Button>
+			) : null}
+			{onSpeak && isSpeaking && onPauseSpeak && onResumeSpeak ? (
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+					onClick={isPaused ? onResumeSpeak : onPauseSpeak}
+					aria-label={isPaused ? 'Resume speech' : 'Pause speech'}
+				>
+					{isPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+					{isPaused ? 'Resume' : 'Pause'}
 				</Button>
 			) : null}
 			<Button

@@ -1,4 +1,4 @@
-export const APP_VERSION = '3.0.0'
+export const APP_VERSION = '3.1.0'
 
 export interface ChangelogEntry {
 	version: string
@@ -8,6 +8,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+	{
+		version: '3.1.0',
+		releasedAt: '2026-10-22',
+		summary: 'Cloudflare Workers AI extras',
+		changes: [
+			'Optional Cloudflare Workers AI integration (Settings → API) on the free daily allowance. It works in the Android app only, because Cloudflare blocks requests from web pages.',
+			'Ask JARVIS for an image and it creates one with FLUX.1 [schnell]. Images appear in the chat, open full screen with a Download button, and are saved to Library → Images.',
+			'Voice input can use Whisper Large V3 Turbo, which brings the mic back in the Android app. Conversation Mode keeps silence detection and the manual "done speaking" button.',
+			'Read-aloud can use Cloudflare MeloTTS, and replies now have Pause/Resume next to Stop.',
+			'Semantic memory: memories are searched by meaning, and near-duplicates are skipped when archiving.',
+			'Settings → Usage shows Cloudflare requests, estimated neurons and remaining allowance separately from Claude. Features pause when the allowance runs out; paid inference is never used.',
+		],
+	},
 	{
 		version: '3.0.0',
 		releasedAt: '2026-10-22',

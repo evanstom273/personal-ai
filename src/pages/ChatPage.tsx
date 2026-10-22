@@ -37,6 +37,8 @@ export function ChatPage() {
 		isSupported: isSpeechOutputSupported,
 		speakAssistantMessage,
 		stop: stopSpeech,
+		pause: pauseSpeech,
+		resume: resumeSpeech,
 		clearError: clearSpeechError,
 	} = useTextToSpeechContext()
 	const { slot: voiceHeaderSlot } = useChatHeaderSlot()
@@ -243,6 +245,8 @@ export function ChatPage() {
 				speechStatus={speechStatus}
 				onSpeakMessage={isSpeechOutputSupported ? handleSpeakMessage : undefined}
 				onStopSpeech={stopSpeech}
+				onPauseSpeech={pauseSpeech}
+				onResumeSpeech={resumeSpeech}
 				speechDisabled={isGenerating}
 			/>
 

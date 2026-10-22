@@ -33,7 +33,9 @@ import {
 	isReminderToolName,
 	REMINDER_TOOL_DECLARATIONS,
 } from '@/services/reminders/reminderTools'
-import type { PendingDeleteConfirmation } from '@/storage/types'
+import { getCloudflareAvailability } from '@/services/cloudflare/client'
+import { generateImageWithCloudflare } from '@/services/cloudflare/imageGeneration'
+import type { MessageMedia, PendingDeleteConfirmation, UserPreferences } from '@/storage/types'
 import type { MessageDocumentLink } from '@/storage/types'
 import { extractDocumentLinkFromToolResult } from '@/utils/messageAttachments'
 
@@ -42,6 +44,25 @@ export interface AppToolCallResult {
 	response: Record<string, unknown>
 	pendingDeleteConfirmation?: PendingDeleteConfirmation
 	documentLink?: MessageDocumentLink
+	generatedMedia?: MessageMedia
+}
+
+const IMAGE_TOOL: Anthropic.Tool = {
+	name: 'generate_image',
+	description:
+		'Generate a 1024×1024 image with FLUX.1 [schnell] on Cloudflare. Only call this when the user explicitly asks you to create, draw, or generate an image. Write a detailed visual prompt in English (subject, style, lighting, composition).',
+	input_schema: {
+		type: 'object',
+		properties: {
+			prompt: { type: 'string', description: 'Detailed image description, under 2,000 characters.' },
+		},
+		required: ['prompt'],
+	},
+}
+
+/** Image generation is offered only in the Android app with Cloudflare set up and enabled. */
+export function isImageGenerationAvailable(preferences: UserPreferences): boolean {
+	return preferences.cfImageGeneration && getCloudflareAvailability(preferences).ok
 }
 
 function approximateUserLocation(): Anthropic.UserLocation | undefined {
@@ -59,6 +80,7 @@ function approximateUserLocation(): Anthropic.UserLocation | undefined {
 export function buildChatTools(options: {
 	webAccess: boolean
 	allowCodebaseInspection: boolean
+	imageGeneration: boolean
 }): Anthropic.ToolUnion[] {
 	const tools: Anthropic.ToolUnion[] = [
 		...DOCUMENT_TOOL_DECLARATIONS,
@@ -67,6 +89,7 @@ export function buildChatTools(options: {
 		...HOME_TODO_TOOL_DECLARATIONS,
 		...MEMORY_TOOL_DECLARATIONS,
 		...(options.allowCodebaseInspection ? CODEBASE_TOOL_DECLARATIONS : []),
+		...(options.imageGeneration ? [IMAGE_TOOL] : []),
 	]
 
 	if (options.webAccess) {
@@ -94,7 +117,29 @@ export function buildChatTools(options: {
 export async function executeAppToolCall(
 	name: string,
 	args: Record<string, unknown>,
+	preferences: UserPreferences,
 ): Promise<AppToolCallResult> {
+	if (name === IMAGE_TOOL.name) {
+		const prompt = typeof args.prompt === 'string' ? args.prompt : ''
+		try {
+			const media = await generateImageWithCloudflare(preferences, prompt)
+			return {
+				name,
+				response: {
+					status: 'generated',
+					size: '1024x1024',
+					note: 'The image is shown to the user under your reply. You cannot see it, so do not describe details beyond the prompt.',
+				},
+				generatedMedia: media,
+			}
+		} catch (error) {
+			return {
+				name,
+				response: { error: error instanceof Error ? error.message : 'Image generation failed.' },
+			}
+		}
+	}
+
 	if (isCodebaseToolName(name)) {
 		return executeCodebaseToolCall(name, args)
 	}
@@ -112,7 +157,7 @@ export async function executeAppToolCall(
 	}
 
 	if (isMemoryToolName(name)) {
-		return executeMemoryToolCall(name, args)
+		return executeMemoryToolCall(name, args, preferences)
 	}
 
 	const toolResult = await executeDocumentToolCall(name, args)

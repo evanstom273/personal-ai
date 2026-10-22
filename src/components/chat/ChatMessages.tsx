@@ -55,6 +55,8 @@ interface ChatMessagesProps {
 	speechStatus?: TtsPlaybackStatus
 	onSpeakMessage?: (message: StoredMessage) => void
 	onStopSpeech?: () => void
+	onPauseSpeech?: () => void
+	onResumeSpeech?: () => void
 	speechDisabled?: boolean
 	streamingSlot?: ReactNode
 	/** Keeps a separate saved scroll position per conversation. */
@@ -77,6 +79,8 @@ export function ChatMessages({
 	speechStatus = 'idle',
 	onSpeakMessage,
 	onStopSpeech,
+	onPauseSpeech,
+	onResumeSpeech,
 	speechDisabled = false,
 	streamingSlot,
 	scrollConversationKey = 'default',
@@ -237,6 +241,8 @@ export function ChatMessages({
 							speechStatus={speechStatus}
 							onSpeakMessage={onSpeakMessage}
 							onStopSpeech={onStopSpeech}
+							onPauseSpeech={onPauseSpeech}
+							onResumeSpeech={onResumeSpeech}
 							speechDisabled={speechDisabled}
 						/>
 					))}
@@ -295,6 +301,8 @@ function MessageRow({
 	speechStatus = 'idle',
 	onSpeakMessage,
 	onStopSpeech,
+	onPauseSpeech,
+	onResumeSpeech,
 	speechDisabled = false,
 	isStreaming = false,
 	streamingActivity = null,
@@ -314,6 +322,8 @@ function MessageRow({
 	speechStatus?: TtsPlaybackStatus
 	onSpeakMessage?: (message: StoredMessage) => void
 	onStopSpeech?: () => void
+	onPauseSpeech?: () => void
+	onResumeSpeech?: () => void
 	speechDisabled?: boolean
 	isStreaming?: boolean
 	streamingSlot?: ReactNode
@@ -509,6 +519,8 @@ function MessageRow({
 									: undefined
 							}
 							onStopSpeak={onStopSpeech}
+							onPauseSpeak={onPauseSpeech}
+							onResumeSpeak={onResumeSpeech}
 							speakStatus={messageSpeechStatus}
 							speakDisabled={speechDisabled}
 							onRegenerate={onRegenerate}

@@ -14,6 +14,7 @@ import { ChatAttachMenu } from '@/components/chat/ChatAttachMenu'
 import { DocumentMentionMenu } from '@/components/chat/DocumentMentionMenu'
 import { Button } from '@/components/ui/button'
 import { useDocumentMentionPicker } from '@/hooks/useDocumentMentionPicker'
+import { useCloudflareTranscriber } from '@/hooks/useCloudflareTranscriber'
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition'
 import { insertDocumentMention, buildDocumentMention } from '@/utils/documentMentions'
 import { createDocument } from '@/services/documents/documentService'
@@ -88,6 +89,7 @@ export function ChatInput({
 			textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
 	}, [])
 
+	const cloudflareTranscriber = useCloudflareTranscriber()
 	const {
 		isSupported,
 		status,
@@ -97,7 +99,7 @@ export function ChatInput({
 		startListening,
 		continueListening,
 		cancelListening,
-	} = useSpeechRecognition()
+	} = useSpeechRecognition({ transcribe: cloudflareTranscriber })
 
 	const isListening = status === 'listening'
 	const isTranscribing = status === 'transcribing'

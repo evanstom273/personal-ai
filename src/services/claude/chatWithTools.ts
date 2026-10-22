@@ -10,6 +10,7 @@ import { buildFullSystemInstruction } from '@/services/claude/documentContext'
 import {
 	buildChatTools,
 	executeAppToolCall,
+	isImageGenerationAvailable,
 } from '@/services/claude/executeAppToolCall'
 import { buildClaudeMessages } from '@/services/claude/messageContent'
 import {
@@ -22,6 +23,7 @@ import { recordUsage } from '@/services/usage/usageService'
 import type {
 	ConversationRecord,
 	MessageDocumentLink,
+	MessageMedia,
 	MessageUsage,
 	MessageWebActivity,
 	PendingDeleteConfirmation,
@@ -33,6 +35,7 @@ import { mergeDocumentLinks } from '@/utils/messageAttachments'
 export interface ChatWithToolsResult {
 	text: string
 	documentLinks: MessageDocumentLink[]
+	media: MessageMedia[]
 	pendingDeleteConfirmation?: PendingDeleteConfirmation
 	web?: MessageWebActivity
 	usage: MessageUsage
@@ -61,6 +64,7 @@ export class GenerationAbortedError extends Error {
 }
 
 function describeToolActivity(name: string): string {
+	if (name === 'generate_image') return 'Generating an image…'
 	if (name.includes('document')) return 'Working on your documents…'
 	if (name.includes('reminder')) return 'Updating reminders…'
 	if (name.includes('project') || name.includes('task')) return 'Updating projects…'
@@ -121,6 +125,7 @@ export async function generateChatWithTools(
 	const tools = buildChatTools({
 		webAccess: preferences.webSearchEnabled,
 		allowCodebaseInspection: preferences.allowCodebaseInspection ?? false,
+		imageGeneration: isImageGenerationAvailable(preferences),
 	})
 	const messages = buildClaudeMessages(history)
 
@@ -131,6 +136,7 @@ export async function generateChatWithTools(
 	const assembler = new ReplyAssembler()
 	let usage = emptyUsageTotals()
 	let documentLinks: MessageDocumentLink[] = []
+	const media: MessageMedia[] = []
 	let pendingDeleteConfirmation: PendingDeleteConfirmation | undefined
 	let stopNote: string | undefined
 	let toolRounds = 0
@@ -249,7 +255,10 @@ export async function generateChatWithTools(
 				for (const toolUse of toolUses) {
 					options.onActivity?.(describeToolActivity(toolUse.name))
 					try {
-						const result = await executeAppToolCall(toolUse.name, toToolInput(toolUse.input))
+						const result = await executeAppToolCall(toolUse.name, toToolInput(toolUse.input), preferences)
+						if (result.generatedMedia) {
+							media.push(result.generatedMedia)
+						}
 						if (result.pendingDeleteConfirmation) {
 							pendingDeleteConfirmation = result.pendingDeleteConfirmation
 						}
@@ -309,6 +318,7 @@ export async function generateChatWithTools(
 	return {
 		text,
 		documentLinks,
+		media,
 		pendingDeleteConfirmation,
 		web: assembler.getWebActivity(),
 		usage,

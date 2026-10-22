@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
+import type { Transcriber } from '@/hooks/useCloudflareTranscriber'
 import type { ChatSubmitPayload } from '@/types/chat'
+import { startAudioRecording, type ActiveRecording } from '@/utils/audioRecorder'
 import {
 	getSpeechRecognitionConstructor,
 	getSpeechRecognitionProfile,
@@ -15,15 +17,20 @@ export type ConversationModeStatus =
 	| 'speaking'
 
 const SILENCE_MS = 5500
+/** Recording mode: microphone level that counts as speech. */
+const SPEECH_RMS_THRESHOLD = 0.018
 
 interface UseConversationModeOptions {
 	onSubmit: (payload: ChatSubmitPayload) => Promise<void>
 	onStopSpeaking: () => void
+	/** Cloudflare Whisper transcription; when absent, browser speech recognition is used. */
+	transcribe?: Transcriber | null
 }
 
 export function useConversationMode({
 	onSubmit,
 	onStopSpeaking,
+	transcribe = null,
 }: UseConversationModeOptions) {
 	const [isActive, setIsActive] = useState(false)
 	const [isMuted, setIsMuted] = useState(false)
@@ -33,6 +40,8 @@ export function useConversationMode({
 
 	const recognitionRef = useRef<SpeechRecognition | null>(null)
 	const micStreamRef = useRef<MediaStream | null>(null)
+	const recordingRef = useRef<ActiveRecording | null>(null)
+	const hasSpeechRef = useRef(false)
 	const committedRef = useRef('')
 	const interimRef = useRef('')
 	const lastSpeechAtRef = useRef(0)
@@ -60,6 +69,8 @@ export function useConversationMode({
 	}, [])
 
 	const stopRecognition = useCallback(() => {
+		recordingRef.current?.cancel()
+		recordingRef.current = null
 		const active = recognitionRef.current
 		recognitionRef.current = null
 		if (active) {
@@ -77,11 +88,32 @@ export function useConversationMode({
 		}
 
 		clearSilenceTimer()
+		const recording = recordingRef.current
+		recordingRef.current = null
 		stopRecognition()
 		setConversationStatus('transcribing')
 
-		const transcript = `${committedRef.current} ${interimRef.current}`.trim()
-		releaseMicrophone()
+		let transcript = `${committedRef.current} ${interimRef.current}`.trim()
+		if (recording && transcribe) {
+			const audio = await recording.stop()
+			releaseMicrophone()
+			if (audio && hasSpeechRef.current) {
+				try {
+					transcript = `${transcript} ${await transcribe(audio.blob, audio.durationMs)}`.trim()
+				} catch (transcriptionError) {
+					setError(
+						transcriptionError instanceof Error
+							? transcriptionError.message
+							: 'Transcription failed.',
+					)
+					setConversationStatus('listening')
+					void beginListeningRef.current()
+					return
+				}
+			}
+		} else {
+			releaseMicrophone()
+		}
 
 		committedRef.current = ''
 		interimRef.current = ''
@@ -105,6 +137,7 @@ export function useConversationMode({
 		releaseMicrophone,
 		stopRecognition,
 		setConversationStatus,
+		transcribe,
 	])
 
 	const scheduleSilenceSubmit = useCallback(() => {
@@ -126,6 +159,64 @@ export function useConversationMode({
 
 	const beginListening = useCallback(async () => {
 		if (!isActiveRef.current || isMutedRef.current) {
+			return
+		}
+
+		if (transcribe) {
+			const microphone = await openMicrophoneStream()
+			if (!microphone.ok) {
+				setError(microphone.message)
+				return
+			}
+			releaseMicrophone()
+			micStreamRef.current = microphone.stream
+
+			try {
+				recordingRef.current = startAudioRecording(microphone.stream)
+			} catch {
+				releaseMicrophone()
+				setError('Could not start audio recording on this device.')
+				return
+			}
+
+			const audioContext = new AudioContext()
+			await audioContext.resume()
+			const analyser = audioContext.createAnalyser()
+			analyser.fftSize = 2048
+			audioContext.createMediaStreamSource(microphone.stream).connect(analyser)
+
+			committedRef.current = ''
+			interimRef.current = ''
+			hasSpeechRef.current = false
+			setLiveTranscript('')
+			setError(null)
+			setConversationStatus('listening')
+			lastSpeechAtRef.current = Date.now()
+
+			// Submit after a pause in speech, judged from the microphone level.
+			const samples = new Uint8Array(analyser.fftSize)
+			const pollSilence = () => {
+				if (!isActiveRef.current || statusRef.current !== 'listening' || !recordingRef.current) {
+					void audioContext.close()
+					return
+				}
+				analyser.getByteTimeDomainData(samples)
+				let sum = 0
+				for (let index = 0; index < samples.length; index += 1) {
+					const value = (samples[index]! - 128) / 128
+					sum += value * value
+				}
+				if (Math.sqrt(sum / samples.length) > SPEECH_RMS_THRESHOLD) {
+					hasSpeechRef.current = true
+					lastSpeechAtRef.current = Date.now()
+				} else if (hasSpeechRef.current && Date.now() - lastSpeechAtRef.current > SILENCE_MS) {
+					void audioContext.close()
+					void submitTranscript()
+					return
+				}
+				window.setTimeout(pollSilence, 200)
+			}
+			pollSilence()
 			return
 		}
 
@@ -188,6 +279,8 @@ export function useConversationMode({
 		scheduleSilenceSubmit,
 		stopRecognition,
 		setConversationStatus,
+		submitTranscript,
+		transcribe,
 	])
 
 	beginListeningRef.current = beginListening
@@ -239,6 +332,8 @@ export function useConversationMode({
 			return
 		}
 
+		// A manual "done speaking" always sends the recording, even if it was quiet.
+		hasSpeechRef.current = true
 		void submitTranscript()
 	}, [submitTranscript])
 

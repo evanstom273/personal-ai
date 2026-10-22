@@ -12,6 +12,7 @@ import {
 	buildChatCapabilitiesInstruction,
 	buildSystemInstruction,
 } from '@/services/claude/systemInstruction'
+import { isImageGenerationAvailable } from '@/services/claude/executeAppToolCall'
 import type { ConversationRecord, UserPreferences } from '@/storage/types'
 import { formatCurrentDateContext } from '@/utils/dateTime'
 
@@ -120,7 +121,9 @@ export async function buildFullSystemInstruction(
 
 	const stable = [
 		buildSystemInstruction(preferences),
-		buildChatCapabilitiesInstruction(),
+		buildChatCapabilitiesInstruction({
+			imageGeneration: isImageGenerationAvailable(preferences),
+		}),
 		buildAppReferenceContext(),
 	].join('\n\n')
 

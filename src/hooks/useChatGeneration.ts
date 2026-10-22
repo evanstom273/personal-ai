@@ -157,6 +157,7 @@ export function useChatGeneration({
 					id: assistantMessageId,
 					role: 'assistant',
 					content: result.text,
+					media: result.media.length > 0 ? result.media : undefined,
 					documentLinks:
 						result.documentLinks.length > 0 ? result.documentLinks : undefined,
 					pendingDeleteConfirmation: result.pendingDeleteConfirmation,
@@ -172,6 +173,13 @@ export function useChatGeneration({
 				)
 				setStreamingAssistant(null)
 				streamingContentRef.current = ''
+
+				if (result.media.length > 0) {
+					void saveMessageMediaToLibrary(result.media, {
+						source: 'generated',
+						prompt: target.messages.at(-1)?.content,
+					})
+				}
 
 				queueMemoryArchive(
 					apiKey,

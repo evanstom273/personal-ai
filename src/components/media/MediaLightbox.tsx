@@ -1,4 +1,4 @@
-import { Maximize2 } from 'lucide-react'
+import { Download, Maximize2 } from 'lucide-react'
 import { useState } from 'react'
 import {
 	Dialog,
@@ -7,6 +7,7 @@ import {
 	DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/utils/cn'
+import { downloadLibraryMediaItem } from '@/utils/downloads'
 
 interface MediaLightboxProps {
 	src: string
@@ -61,6 +62,17 @@ export function MediaLightbox({
 					<DialogDescription className="sr-only">
 						Full screen image viewer
 					</DialogDescription>
+					<button
+						type="button"
+						onClick={() => {
+							const mimeType = src.match(/^data:([^;,]+)/)?.[1] ?? 'image/png'
+							downloadLibraryMediaItem(title ?? alt, mimeType, src)
+						}}
+						className="absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
+					>
+						<Download className="h-3.5 w-3.5" />
+						Download
+					</button>
 					<div className="flex min-h-0 flex-1 items-center justify-center p-4 pt-14">
 						<img
 							src={src}

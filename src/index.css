@@ -31,7 +31,7 @@
 
 :root {
 	--app-bottom-inset: env(safe-area-inset-bottom, 0px);
-	--bottom-nav-height: 5.5rem;
+	--bottom-nav-height: 4.75rem;
 	--radius: 0.875rem;
 	--nav-island: #151820;
 	--nav-island-border: #242833;
@@ -78,7 +78,7 @@ html {
 @media (display-mode: standalone) {
 	:root {
 		/* Android PWA often reports 0 for safe-area-inset-bottom despite gesture nav bar */
-		--app-bottom-inset: max(env(safe-area-inset-bottom, 0px), 20px);
+		--app-bottom-inset: max(env(safe-area-inset-bottom, 0px), 14px);
 	}
 }
 
@@ -211,8 +211,9 @@ body {
 }
 
 .bottom-nav-dock {
+	/* Clear the gesture/safe area with a small gap, never less than 0.5rem. */
 	padding:
-		0.5rem 1rem calc(var(--app-bottom-inset) + 0.75rem);
+		0.5rem 1rem max(calc(var(--app-bottom-inset) + 0.25rem), 0.5rem);
 }
 
 .bottom-nav-island {

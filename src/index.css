@@ -30,6 +30,9 @@
 }
 
 :root {
+	/* Capacitor injects --safe-area-inset-* in the Android app, where the WebView
+	   can report 0 for env() while drawing edge-to-edge under the status bar. */
+	--app-top-inset: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
 	--app-bottom-inset: env(safe-area-inset-bottom, 0px);
 	--bottom-nav-gap: max(calc(var(--app-bottom-inset) + 0.25rem), 0.5rem);
 	/* Height of the nav island plus the gap below it; floating controls sit above this. */
@@ -118,6 +121,7 @@ body {
 
 .app-shell {
 	position: relative;
+	padding-top: var(--app-top-inset);
 	height: 100svh;
 	max-height: 100svh;
 	background: transparent;

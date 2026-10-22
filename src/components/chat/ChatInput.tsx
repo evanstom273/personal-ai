@@ -69,6 +69,7 @@ export function ChatInput({
 	const [attachError, setAttachError] = useState<string | null>(null)
 	const [inputMethod, setInputMethod] = useState<ChatInputMethod>('typed')
 	const textareaRef = useRef<HTMLTextAreaElement>(null)
+	const formRef = useRef<HTMLFormElement>(null)
 	const mentionAnchorRef = useRef<HTMLDivElement>(null)
 	const promptBeforeSpeechRef = useRef('')
 	const [mentionMenuStyle, setMentionMenuStyle] = useState<CSSProperties | null>(
@@ -437,8 +438,26 @@ export function ChatInput({
 		onCancelEdit?.()
 	}
 
+	// Publish the bar's height so floating buttons (scratchpad) can sit above it.
+	useEffect(() => {
+		const form = formRef.current
+		if (!form) {
+			return
+		}
+		const root = document.documentElement
+		const observer = new ResizeObserver(() => {
+			root.style.setProperty('--chat-input-height', `${form.offsetHeight}px`)
+		})
+		observer.observe(form)
+		return () => {
+			observer.disconnect()
+			root.style.removeProperty('--chat-input-height')
+		}
+	}, [])
+
 	return (
 		<form
+			ref={formRef}
 			onSubmit={handleSubmit}
 			className="chat-input-bar relative z-30 w-full max-w-full shrink-0 overflow-visible border-t border-border px-3 py-2.5 md:px-8 md:py-4"
 		>

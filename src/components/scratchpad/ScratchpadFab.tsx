@@ -17,7 +17,7 @@ export function ScratchpadFab() {
 				'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 			)}
 			style={{
-				bottom: 'calc(var(--bottom-nav-height) + 0.5rem)',
+				bottom: 'calc(var(--bottom-nav-height) + var(--chat-input-height, 0px) + 0.5rem)',
 			}}
 			aria-label="Open scratchpad"
 		>
@@ -40,7 +40,7 @@ export function ScratchpadBusyIndicator() {
 		<div
 			className="fixed left-4 z-30 flex items-center gap-2 rounded-full border border-border/60 bg-card/95 px-3 py-1.5 text-xs text-muted-foreground shadow-lg backdrop-blur-md"
 			style={{
-				bottom: 'calc(var(--bottom-nav-height) + 3.75rem)',
+				bottom: 'calc(var(--bottom-nav-height) + var(--chat-input-height, 0px) + 3.75rem)',
 			}}
 		>
 			<Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
